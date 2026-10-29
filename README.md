@@ -1,7 +1,7 @@
 
 # AgentFault Lab
 
-AgentFault Lab is a research-inspired project for evaluating AI agent reliability under controlled tool failures.
+AgentFault Lab is a Python-based project that tests AI agent reliability by simulating tool failures, validating responses, and evaluating recovery strategies through automated testing and measurable experiments.
 
 ## Current Features
 
@@ -11,7 +11,7 @@ AgentFault Lab is a research-inspired project for evaluating AI agent reliabilit
 - Deterministic response validation
 - Automated tests using pytest
 
-## Tech Stack
+## Technology Stack
 
 - Python
 - pytest
@@ -20,7 +20,7 @@ AgentFault Lab is a research-inspired project for evaluating AI agent reliabilit
 
 ## Run Locally
 
-From the project root, activate the virtual environment and run:
+Activate the virtual environment, then run:
 
 ```powershell
 $env:PYTHONPATH = "src"
