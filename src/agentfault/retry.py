@@ -1,26 +1,30 @@
+
+import time
 from collections.abc import Callable
 
+from agentfault.backoff import calculate_backoff
 from agentfault.models import ToolResult
 
 
 def run_with_retry(
     tool_call: Callable[[], ToolResult],
-    max_attempts: int = 3
+    max_attempts: int = 3,
+    base_delay: float = 1.0,
+    max_delay: float = 30.0,
+    jitter: bool = True,
+    sleep_fn: Callable[[float], None] = time.sleep
 ) -> ToolResult:
-    """
-    Execute a tool with retry support.
+    """Execute a tool using bounded retries and exponential backoff."""
 
-    Retry only when the failure is retryable.
-    Stop after reaching the maximum attempts.
-    """
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
 
-    last_result = None
+    if base_delay < 0 or max_delay < 0:
+        raise ValueError("Retry delays cannot be negative")
 
     for attempt in range(1, max_attempts + 1):
+
         result = tool_call()
-        print(f"Attempt {attempt}: {result.status}")
 
         if result.status == "success":
             return result
@@ -28,6 +32,16 @@ def run_with_retry(
         if not result.retryable:
             return result
 
-        last_result = result
+        if attempt == max_attempts:
+            return result
 
-    return last_result
+        delay = calculate_backoff(
+            attempt=attempt,
+            base_delay=base_delay,
+            max_delay=max_delay,
+            jitter=jitter
+        )
+
+        sleep_fn(delay)
+
+    raise RuntimeError("Unexpected retry state")
