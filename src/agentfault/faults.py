@@ -63,6 +63,8 @@ def validate_result(result: ToolResult) -> bool:
         isinstance(amount, (int, float))
         and not isinstance(amount, bool)
     )
+
+
 def should_retry(result: ToolResult) -> bool:
     """Determine whether a failed tool call should be retried."""
 

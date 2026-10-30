@@ -10,6 +10,9 @@ class ToolResult(BaseModel):
     data: dict[str, Any] | None = None
     error: str | None = None
     error_type: str | None = None
+    retryable: bool = False
+    
+
 
     @model_validator(mode="after")
     def validate_response(self):
@@ -18,6 +21,8 @@ class ToolResult(BaseModel):
                 raise ValueError(
                     "Successful results must contain data"
                 )
+            if self.retryable:
+                raise ValueError("Successful results cannot be retryable")
 
             if self.error is not None or self.error_type is not None:
                 raise ValueError(
