@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from agentfault.backoff import calculate_backoff
 from agentfault.models import ToolResult
-
+from agentfault.safe_execution import safe_tool_call
 
 def run_with_retry(
     tool_call: Callable[[], ToolResult],
@@ -24,7 +24,7 @@ def run_with_retry(
 
     for attempt in range(1, max_attempts + 1):
 
-        result = tool_call()
+        result = safe_tool_call(tool_call)
 
         if result.status == "success":
             return result
