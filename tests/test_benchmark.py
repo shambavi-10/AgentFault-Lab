@@ -91,8 +91,8 @@ def test_compare_agents_ranks_by_success_rate():
 
     assert [agent.agent_name for agent in ranked] == [
         "Agent C",
-        "Agent B",
-        "Agent A"
+        "Agent A",
+        "Agent B"
     ]
 
 
@@ -112,7 +112,7 @@ def test_compare_agents_uses_evaluation_score_as_tiebreaker():
     assert ranked[0].agent_name == "Agent B"
 
 
-def test_compare_agents_uses_latency_as_final_tiebreaker():
+def test_compare_agents_does_not_rank_by_latency():
     from agentfault.benchmark import compare_agents
 
     agent_a = calculate_benchmark(
@@ -125,7 +125,9 @@ def test_compare_agents_uses_latency_as_final_tiebreaker():
 
     ranked = compare_agents([agent_a, agent_b])
 
-    assert ranked[0].agent_name == "Agent B"
+    # Equal ranking metrics: preserve original order.
+    assert ranked[0].agent_name == "Agent A"
+    assert ranked[1].agent_name == "Agent B"
 
 
 def test_compare_agents_handles_empty_list():
@@ -149,7 +151,7 @@ def test_generate_benchmark_report():
     assert "AGENTFAULT LAB - BENCHMARK REPORT" in report
     assert "Agent B" in report
     assert "Agent A" in report
-    assert "Success rate: 90.00%" in report
+    assert "Valid success rate: 90.00%" in report
     assert "Rank: 1" in report
     assert "End of benchmark report" in report
 

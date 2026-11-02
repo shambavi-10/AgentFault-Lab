@@ -1,5 +1,6 @@
 import time
 from collections.abc import Callable
+from typing import Literal
 
 from agentfault.backoff import calculate_backoff
 from agentfault.models import ToolResult
@@ -14,7 +15,10 @@ def run_with_retry(
     max_delay: float = 30.0,
     jitter: bool = True,
     sleep_fn: Callable[[float], None] = time.sleep,
-    trace: ExecutionTrace | None = None
+    trace: ExecutionTrace | None = None,
+    retry_strategy: Literal[
+        "none", "fixed", "exponential"
+    ] = "exponential"
 ) -> ToolResult:
 
     if max_attempts < 1:
@@ -22,6 +26,12 @@ def run_with_retry(
 
     if base_delay < 0 or max_delay < 0:
         raise ValueError("Retry delays cannot be negative")
+
+    if retry_strategy not in {"none", "fixed", "exponential"}:
+        raise ValueError("Unsupported retry strategy")
+
+    if retry_strategy == "none":
+        max_attempts = 1
 
     if trace:
         trace.record("execution_started")
@@ -70,7 +80,7 @@ def run_with_retry(
                 duration_ms=duration_ms
             )
 
-        if not result.retryable:
+        if not result.retryable or attempt == max_attempts:
 
             if trace:
                 trace.record(
@@ -81,23 +91,16 @@ def run_with_retry(
 
             return result
 
-        if attempt == max_attempts:
+        if retry_strategy == "fixed":
+            delay = min(base_delay, max_delay)
 
-            if trace:
-                trace.record(
-                    "execution_completed",
-                    attempt=attempt,
-                    status="failure"
-                )
-
-            return result
-
-        delay = calculate_backoff(
-            attempt=attempt,
-            base_delay=base_delay,
-            max_delay=max_delay,
-            jitter=jitter
-        )
+        else:
+            delay = calculate_backoff(
+                attempt=attempt,
+                base_delay=base_delay,
+                max_delay=max_delay,
+                jitter=jitter
+            )
 
         if trace:
             trace.record(

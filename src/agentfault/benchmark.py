@@ -1,3 +1,4 @@
+
 from dataclasses import dataclass
 
 
@@ -13,6 +14,7 @@ class BenchmarkResult:
     average_latency: float
     total_retries: int
     average_evaluation_score: float
+    total_backoff_seconds: float
 
 
 def calculate_benchmark(
@@ -21,7 +23,8 @@ def calculate_benchmark(
     successful_executions: int,
     total_retries: int,
     total_latency: float,
-    evaluation_scores: list[float]
+    evaluation_scores: list[float],
+    total_backoff_seconds: float = 0.0
 ) -> BenchmarkResult:
     """Calculate benchmark metrics for one agent configuration."""
 
@@ -39,16 +42,23 @@ def calculate_benchmark(
     if total_latency < 0:
         raise ValueError("Total latency cannot be negative")
 
+    if total_backoff_seconds < 0:
+        raise ValueError("Total backoff cannot be negative")
+
     if not evaluation_scores:
         raise ValueError("At least one evaluation score is required")
 
-    if any(score < 0 or score > 1 for score in evaluation_scores):
+    if any(
+        not isinstance(score, (int, float))
+        or isinstance(score, bool)
+        or not 0 <= score <= 1
+        for score in evaluation_scores
+    ):
         raise ValueError("Evaluation scores must be between 0 and 1")
 
     failed_executions = total_executions - successful_executions
     success_rate = successful_executions / total_executions
     average_latency = total_latency / total_executions
-
     average_evaluation_score = (
         sum(evaluation_scores) / len(evaluation_scores)
     )
@@ -61,22 +71,25 @@ def calculate_benchmark(
         success_rate=round(success_rate, 2),
         average_latency=round(average_latency, 4),
         total_retries=total_retries,
-        average_evaluation_score=round(average_evaluation_score, 2)
+        average_evaluation_score=round(average_evaluation_score, 2),
+        total_backoff_seconds=round(total_backoff_seconds, 4)
     )
+
 
 def compare_agents(
     results: list[BenchmarkResult]
 ) -> list[BenchmarkResult]:
-    """Rank agents by success rate, evaluation score, and latency."""
+    """Rank agents by evaluation score, success rate, and retry count."""
 
     return sorted(
         results,
         key=lambda result: (
-            -result.success_rate,
             -result.average_evaluation_score,
-            result.average_latency
+            -result.success_rate,
+            result.total_retries
         )
     )
+
 
 def generate_benchmark_report(
     results: list[BenchmarkResult]
@@ -99,11 +112,12 @@ def generate_benchmark_report(
             f"Rank: {rank}",
             f"Agent: {result.agent_name}",
             f"Executions: {result.total_executions}",
-            f"Successful: {result.successful_executions}",
-            f"Failed: {result.failed_executions}",
-            f"Success rate: {result.success_rate * 100:.2f}%",
-            f"Average latency: {result.average_latency:.4f} seconds",
+            f"Valid business successes: {result.successful_executions}",
+            f"Failed executions: {result.failed_executions}",
+            f"Valid success rate: {result.success_rate * 100:.2f}%",
+            f"Average processing latency: {result.average_latency:.4f} seconds",
             f"Total retries: {result.total_retries}",
+            f"Total scheduled backoff: {result.total_backoff_seconds:.4f} seconds",
             f"Average evaluation score: "
             f"{result.average_evaluation_score:.2f}",
             "-" * 60
