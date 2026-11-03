@@ -1,10 +1,15 @@
+
 import time
 from collections.abc import Callable
 from typing import Literal
 
 from agentfault.backoff import calculate_backoff
+from agentfault.circuit_breaker import CircuitBreaker
 from agentfault.models import ToolResult
-from agentfault.safe_execution import safe_tool_call
+from agentfault.safe_execution import (
+    safe_tool_call,
+    safe_tool_call_with_circuit_breaker
+)
 from agentfault.tracing import ExecutionTrace
 
 
@@ -18,7 +23,8 @@ def run_with_retry(
     trace: ExecutionTrace | None = None,
     retry_strategy: Literal[
         "none", "fixed", "exponential"
-    ] = "exponential"
+    ] = "exponential",
+    circuit_breaker: CircuitBreaker | None = None
 ) -> ToolResult:
 
     if max_attempts < 1:
@@ -40,17 +46,46 @@ def run_with_retry(
 
         start_time = time.perf_counter()
 
+        # Execute the tool through the circuit breaker.
+        if circuit_breaker is not None:
+            result = safe_tool_call_with_circuit_breaker(
+                tool_call,
+                circuit_breaker
+            )
+        else:
+            result = safe_tool_call(tool_call)
+
+        duration_ms = (
+            time.perf_counter() - start_time
+        ) * 1000
+
+        # A blocked request is not an actual tool execution.
+        if result.error_type == "circuit_open":
+
+            if trace:
+                trace.record(
+                    "circuit_breaker_blocked",
+                    attempt=attempt,
+                    status="failure",
+                    error_type="circuit_open",
+                    message="Circuit breaker blocked tool execution",
+                    duration_ms=duration_ms
+                )
+
+                trace.record(
+                    "execution_completed",
+                    attempt=attempt,
+                    status="failure"
+                )
+
+            return result
+
+        # Record actual tool execution.
         if trace:
             trace.record(
                 "tool_call_started",
                 attempt=attempt
             )
-
-        result = safe_tool_call(tool_call)
-
-        duration_ms = (
-            time.perf_counter() - start_time
-        ) * 1000
 
         if result.status == "success":
 
