@@ -162,3 +162,48 @@ def test_generate_benchmark_report_with_empty_results():
     report = generate_benchmark_report([])
 
     assert report == "No benchmark results available."
+
+def test_benchmark_calculates_mean_run_success_rate():
+
+    result = calculate_benchmark(
+        agent_name="Mean Test Agent",
+        total_executions=4,
+        successful_executions=3,
+        total_retries=2,
+        total_latency=4.0,
+        evaluation_scores=[1.0, 1.0, 0.0, 1.0],
+        run_success_rates=[0.5, 1.0, 0.5, 1.0]
+    )
+
+    assert result.mean_run_success_rate == 0.75
+
+
+def test_benchmark_calculates_success_rate_standard_deviation():
+
+    result = calculate_benchmark(
+        agent_name="Stability Test Agent",
+        total_executions=4,
+        successful_executions=3,
+        total_retries=2,
+        total_latency=4.0,
+        evaluation_scores=[1.0, 1.0, 0.0, 1.0],
+        run_success_rates=[0.5, 1.0, 0.5, 1.0]
+    )
+
+    assert result.success_rate_std_dev == 0.25
+
+
+def test_identical_run_success_rates_have_zero_standard_deviation():
+
+    result = calculate_benchmark(
+        agent_name="Consistent Agent",
+        total_executions=4,
+        successful_executions=4,
+        total_retries=0,
+        total_latency=2.0,
+        evaluation_scores=[1.0, 1.0, 1.0, 1.0],
+        run_success_rates=[1.0, 1.0, 1.0, 1.0]
+    )
+
+    assert result.mean_run_success_rate == 1.0
+    assert result.success_rate_std_dev == 0.0

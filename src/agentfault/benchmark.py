@@ -1,5 +1,6 @@
 
 from dataclasses import dataclass
+from statistics import mean, pstdev
 
 
 @dataclass
@@ -15,6 +16,8 @@ class BenchmarkResult:
     total_retries: int
     average_evaluation_score: float
     total_backoff_seconds: float
+    mean_run_success_rate: float = 0.0
+    success_rate_std_dev: float = 0.0
 
 
 def calculate_benchmark(
@@ -24,7 +27,8 @@ def calculate_benchmark(
     total_retries: int,
     total_latency: float,
     evaluation_scores: list[float],
-    total_backoff_seconds: float = 0.0
+    total_backoff_seconds: float = 0.0,
+    run_success_rates: list[float] | None = None
 ) -> BenchmarkResult:
     """Calculate benchmark metrics for one agent configuration."""
 
@@ -56,12 +60,27 @@ def calculate_benchmark(
     ):
         raise ValueError("Evaluation scores must be between 0 and 1")
 
+    if run_success_rates is None:
+        run_success_rates = [successful_executions / total_executions]
+
+    if not run_success_rates:
+        raise ValueError("At least one run success rate is required")
+
+    if any(
+        not isinstance(rate, (int, float))
+        or isinstance(rate, bool)
+        or not 0 <= rate <= 1
+        for rate in run_success_rates
+    ):
+        raise ValueError("Run success rates must be between 0 and 1")
+
     failed_executions = total_executions - successful_executions
     success_rate = successful_executions / total_executions
     average_latency = total_latency / total_executions
-    average_evaluation_score = (
-        sum(evaluation_scores) / len(evaluation_scores)
-    )
+    average_evaluation_score = mean(evaluation_scores)
+
+    mean_run_success_rate = mean(run_success_rates)
+    success_rate_std_dev = pstdev(run_success_rates)
 
     return BenchmarkResult(
         agent_name=agent_name,
@@ -72,7 +91,9 @@ def calculate_benchmark(
         average_latency=round(average_latency, 4),
         total_retries=total_retries,
         average_evaluation_score=round(average_evaluation_score, 2),
-        total_backoff_seconds=round(total_backoff_seconds, 4)
+        total_backoff_seconds=round(total_backoff_seconds, 4),
+        mean_run_success_rate=round(mean_run_success_rate, 4),
+        success_rate_std_dev=round(success_rate_std_dev, 4)
     )
 
 
@@ -115,6 +136,8 @@ def generate_benchmark_report(
             f"Valid business successes: {result.successful_executions}",
             f"Failed executions: {result.failed_executions}",
             f"Valid success rate: {result.success_rate * 100:.2f}%",
+            f"Mean run success rate: {result.mean_run_success_rate * 100:.2f}%",
+            f"Success rate standard deviation: {result.success_rate_std_dev * 100:.2f} percentage points",
             f"Average processing latency: {result.average_latency:.4f} seconds",
             f"Total retries: {result.total_retries}",
             f"Total scheduled backoff: {result.total_backoff_seconds:.4f} seconds",

@@ -1,9 +1,11 @@
+
 from agentfault.agent_config import AgentConfig
 from agentfault.benchmark import generate_benchmark_report
 from agentfault.benchmark_runner import run_benchmark_suite
 from agentfault.scenarios import FailureScenario
 
 
+# Configure agents with different retry strategies.
 agents = [
     AgentConfig(
         name="Agent A - No Retry",
@@ -16,7 +18,6 @@ agents = [
         retry_strategy="fixed",
         base_delay=0.2
     ),
-   
     AgentConfig(
         name="Agent C - Exponential Retry",
         max_attempts=3,
@@ -27,6 +28,7 @@ agents = [
 ]
 
 
+# Define controlled failure scenarios.
 scenarios = [
     FailureScenario(
         name="Timeout Recovery",
@@ -52,12 +54,28 @@ scenarios = [
 ]
 
 
+# Number of times to repeat the complete scenario set.
+REPETITIONS = 10
+
+
+# Execute the repeated benchmark.
 results = run_benchmark_suite(
     configs=agents,
-    scenarios=scenarios
+    scenarios=scenarios,
+    repetitions=REPETITIONS
 )
 
+
+# Display benchmark information.
 print("\nAUTOMATED AGENT BENCHMARK")
-print("=" * 50)
+print("=" * 60)
+
+print(f"Number of agents: {len(agents)}")
+print(f"Number of scenarios: {len(scenarios)}")
+print(f"Repetitions per scenario: {REPETITIONS}")
+print(f"Executions per agent: {len(scenarios) * REPETITIONS}")
+print(f"Total executions: {len(agents) * len(scenarios) * REPETITIONS}")
+
+print("=" * 60)
 
 print(generate_benchmark_report(results))
