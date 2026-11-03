@@ -1,7 +1,7 @@
 from agentfault.agent_config import AgentConfig
 from agentfault.agent_executor import execute_scenario
 from agentfault.scenarios import FailureScenario
-
+from agentfault.agent_executor import execute_stochastic
 
 def test_agent_executor_runs_scenario_successfully():
 
@@ -107,3 +107,73 @@ def test_fixed_retry_records_scheduled_backoff():
     assert execution.result.status == "success"
     assert execution.retry_count == 2
     assert execution.scheduled_backoff_seconds == 1.0
+
+
+def test_stochastic_execution_returns_agent_execution():
+
+    config = AgentConfig(
+        name="Stochastic Agent",
+        max_attempts=3,
+        retry_strategy="exponential",
+        base_delay=0.1,
+        jitter=False
+    )
+
+    execution = execute_stochastic(
+        config=config,
+        timeout_probability=0.3,
+        rate_limit_probability=0.2,
+        seed=42
+    )
+
+    assert execution.agent_name == "Stochastic Agent"
+    assert execution.scenario_name == "Stochastic Failure Simulation"
+    assert execution.result.status in {"success", "failure"}
+    assert execution.retry_count >= 0
+    assert execution.execution_time_ms >= 0
+
+
+def test_stochastic_execution_is_reproducible_with_same_seed():
+
+    config = AgentConfig(
+        name="Reproducible Agent",
+        max_attempts=1,
+        retry_strategy="none"
+    )
+
+    execution_a = execute_stochastic(
+        config=config,
+        timeout_probability=0.3,
+        rate_limit_probability=0.2,
+        seed=42
+    )
+
+    execution_b = execute_stochastic(
+        config=config,
+        timeout_probability=0.3,
+        rate_limit_probability=0.2,
+        seed=42
+    )
+
+    assert execution_a.result == execution_b.result
+
+
+def test_stochastic_execution_can_recover_from_timeout():
+
+    config = AgentConfig(
+        name="Recovery Agent",
+        max_attempts=3,
+        retry_strategy="fixed",
+        base_delay=0.2
+    )
+
+    execution = execute_stochastic(
+        config=config,
+        timeout_probability=1.0,
+        rate_limit_probability=0.0,
+        seed=42
+    )
+
+    assert execution.result.status == "failure"
+    assert execution.retry_count == 2
+    assert execution.valid_business_result is False
