@@ -207,3 +207,4 @@ def test_identical_run_success_rates_have_zero_standard_deviation():
 
     assert result.mean_run_success_rate == 1.0
     assert result.success_rate_std_dev == 0.0
+
