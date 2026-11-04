@@ -65,3 +65,54 @@ class ExperimentResponse(BaseModel):
     created_at: datetime
     scenarios: list[FailureScenarioRequest]
     reliability_config: ReliabilityConfigRequest
+
+
+class TraceEventResponse(BaseModel):
+    """Response schema for an individual trace event."""
+
+    event_type: str
+    execution_id: str
+    attempt: int
+    status: str | None = None
+    error_type: str | None = None
+    message: str | None = None
+    duration_ms: float | None = None
+    timestamp: str
+
+
+class ExecutionTraceResponse(BaseModel):
+    """Response schema for an execution trace."""
+
+    execution_id: str
+    events: list[TraceEventResponse]
+
+
+class ScenarioExecutionResultResponse(BaseModel):
+    """Response schema for one scenario execution."""
+
+    scenario_name: str
+    expected_status: str
+    result: dict
+    trace: ExecutionTraceResponse
+    execution_time_ms: float
+    retry_count: int
+    fallback_count: int
+    fallback_used: bool
+    circuit_breaker_enabled: bool
+    valid_business_result: bool
+    passed: bool
+
+
+class ExperimentExecutionResponse(BaseModel):
+    """Response schema for a complete experiment execution."""
+
+    experiment_id: str
+    experiment_name: str
+    status: str
+    scenario_results: list[ScenarioExecutionResultResponse]
+    total_scenarios: int
+    passed_scenarios: int
+    failed_scenarios: int
+    success_rate: float
+    total_execution_time_ms: float
+    total_retries: int

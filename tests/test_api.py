@@ -277,3 +277,72 @@ def test_delete_running_experiment(
     )
 
     assert response.status_code == 409
+
+
+# --------------------------------------------------
+# Experiment execution tests
+# --------------------------------------------------
+
+def test_run_experiment_successfully(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    response = client.post(
+        f"/api/v1/experiments/{experiment_id}/run"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["experiment_id"] == experiment_id
+    assert data["experiment_name"] == "API Experiment Test"
+    assert data["status"] == "completed"
+
+    assert data["total_scenarios"] == 2
+    assert data["passed_scenarios"] == 2
+    assert data["failed_scenarios"] == 0
+
+    assert data["success_rate"] == 1.0
+    assert len(data["scenario_results"]) == 2
+
+    first_result = data["scenario_results"][0]
+
+    assert first_result["scenario_name"] == "Normal Execution"
+    assert first_result["passed"] is True
+    assert first_result["result"]["status"] == "success"
+    assert first_result["trace"]["execution_id"]
+
+
+def test_run_nonexistent_experiment(client):
+    response = client.post(
+        "/api/v1/experiments/nonexistent-id/run"
+    )
+
+    assert response.status_code == 404
+
+
+def test_run_experiment_updates_experiment_status(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    run_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/run"
+    )
+
+    assert run_response.status_code == 200
+
+    get_response = client.get(
+        f"/api/v1/experiments/{experiment_id}"
+    )
+
+    assert get_response.status_code == 200
+    assert get_response.json()["status"] == "completed"
