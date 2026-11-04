@@ -406,3 +406,58 @@ def test_get_results_for_nonexistent_experiment(client):
     )
 
     assert response.status_code == 404
+
+# --------------------------------------------------
+# Experiment execution history tests
+# --------------------------------------------------
+
+def test_get_experiment_history_successfully(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    run_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/run"
+    )
+
+    assert run_response.status_code == 200
+
+    response = client.get(
+        f"/api/v1/experiments/{experiment_id}/history"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert len(data) == 1
+    assert data[0]["experiment_id"] == experiment_id
+    assert data[0]["status"] == "completed"
+    assert data[0]["total_scenarios"] == 2
+
+
+def test_get_empty_experiment_history(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    response = client.get(
+        f"/api/v1/experiments/{experiment_id}/history"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_get_history_for_nonexistent_experiment(client):
+    response = client.get(
+        "/api/v1/experiments/nonexistent-id/history"
+    )
+
+    assert response.status_code == 404

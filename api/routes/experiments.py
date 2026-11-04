@@ -199,8 +199,11 @@ def run_experiment(
         )
 
         results_store = get_execution_results_store()
-        results_store[experiment_id] = response
 
+        if experiment_id not in results_store:
+            results_store[experiment_id] = []
+
+        results_store[experiment_id].append(response)
         return response
 
     except KeyError as exc:
@@ -229,15 +232,38 @@ def get_experiment_results(
         manager.get_experiment(experiment_id)
 
         results_store = get_execution_results_store()
-        result = results_store.get(experiment_id)
+        execution_history = results_store.get(experiment_id, [])
 
-        if result is None:
+        if not execution_history:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No execution results found for this experiment",
             )
 
-        return result
+        return execution_history[-1]
+
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+@router.get(
+    "/{experiment_id}/history",
+    response_model=list[ExperimentExecutionResponse],
+)
+def get_experiment_history(
+    experiment_id: str,
+    manager: ExperimentManager = Depends(get_experiment_manager),
+):
+    """Retrieve all execution records for an experiment."""
+
+    try:
+        manager.get_experiment(experiment_id)
+
+        results_store = get_execution_results_store()
+        execution_history = results_store.get(experiment_id, [])
+
+        return execution_history
 
     except KeyError as exc:
         raise HTTPException(
