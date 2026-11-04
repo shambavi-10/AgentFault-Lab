@@ -2,6 +2,8 @@
 from fastapi import FastAPI, HTTPException
 
 from api.dependencies import get_dashboard_service
+from api.routes.experiments import router as experiment_router
+
 from agentfault.dashboard_service import DashboardServiceError
 
 
@@ -10,6 +12,9 @@ app = FastAPI(
     description="API for testing and analyzing AI agent reliability.",
     version="1.0.0",
 )
+
+
+app.include_router(experiment_router)
 
 
 @app.get("/")

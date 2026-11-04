@@ -4,13 +4,62 @@ import pytest
 from fastapi.testclient import TestClient
 
 import api.main as main
+
+from api.experiment_dependencies import get_experiment_manager
+from agentfault.experiment_manager import ExperimentManager
 from agentfault.dashboard_service import DashboardServiceError
 
 
 @pytest.fixture
-def client():
-    return TestClient(main.app)
+def experiment_manager():
+    return ExperimentManager()
 
+
+@pytest.fixture
+def client(experiment_manager):
+    main.app.dependency_overrides[get_experiment_manager] = (
+        lambda: experiment_manager
+    )
+
+    with TestClient(main.app) as test_client:
+        yield test_client
+
+    main.app.dependency_overrides.clear()
+
+
+def valid_experiment_payload():
+    return {
+        "name": "API Experiment Test",
+        "description": "Testing experiment management API",
+        "scenarios": [
+            {
+                "name": "Normal Execution",
+                "failure_sequence": ["none"],
+                "expected_status": "success",
+            },
+            {
+                "name": "Timeout Recovery",
+                "failure_sequence": ["timeout", "none"],
+                "expected_status": "success",
+            },
+        ],
+        "reliability_config": {
+            "max_attempts": 3,
+            "retry_strategy": "exponential",
+            "base_delay": 1.0,
+            "max_delay": 30.0,
+            "jitter": True,
+            "enable_circuit_breaker": False,
+            "failure_threshold": 3,
+            "recovery_timeout": 10.0,
+            "enable_fallback": True,
+        },
+    }
+
+
+# --------------------------------------------------
+# Existing API tests
+# --------------------------------------------------
 
 def test_root_endpoint(client):
     response = client.get("/")
@@ -76,3 +125,155 @@ def test_dashboard_error_handling(client, monkeypatch):
     assert response.json() == {
         "detail": "Unable to generate dashboard data",
     }
+
+
+# --------------------------------------------------
+# Experiment creation tests
+# --------------------------------------------------
+
+def test_create_experiment(client):
+    response = client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    assert response.status_code == 201
+
+    data = response.json()
+
+    assert data["name"] == "API Experiment Test"
+    assert data["status"] == "pending"
+    assert len(data["scenarios"]) == 2
+    assert data["experiment_id"]
+
+
+def test_create_experiment_with_invalid_scenario(client):
+    payload = valid_experiment_payload()
+
+    payload["scenarios"][0]["failure_sequence"] = [
+        "invalid_failure"
+    ]
+
+    response = client.post(
+        "/api/v1/experiments",
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_experiment_without_scenarios(client):
+    payload = valid_experiment_payload()
+    payload["scenarios"] = []
+
+    response = client.post(
+        "/api/v1/experiments",
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+
+# --------------------------------------------------
+# Experiment listing tests
+# --------------------------------------------------
+
+def test_list_experiments(client):
+    client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    response = client.get("/api/v1/experiments")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+    assert response.json()[0]["name"] == "API Experiment Test"
+
+
+def test_list_experiments_when_empty(client):
+    response = client.get("/api/v1/experiments")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+# --------------------------------------------------
+# Experiment retrieval tests
+# --------------------------------------------------
+
+def test_get_experiment_by_id(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    response = client.get(
+        f"/api/v1/experiments/{experiment_id}"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["experiment_id"] == experiment_id
+
+
+def test_get_nonexistent_experiment(client):
+    response = client.get(
+        "/api/v1/experiments/nonexistent-id"
+    )
+
+    assert response.status_code == 404
+
+
+# --------------------------------------------------
+# Experiment deletion tests
+# --------------------------------------------------
+
+def test_delete_experiment(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    response = client.delete(
+        f"/api/v1/experiments/{experiment_id}"
+    )
+
+    assert response.status_code == 204
+
+    get_response = client.get(
+        f"/api/v1/experiments/{experiment_id}"
+    )
+
+    assert get_response.status_code == 404
+
+
+def test_delete_nonexistent_experiment(client):
+    response = client.delete(
+        "/api/v1/experiments/nonexistent-id"
+    )
+
+    assert response.status_code == 404
+
+
+def test_delete_running_experiment(
+    client,
+    experiment_manager,
+):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    experiment_manager.start_experiment(experiment_id)
+
+    response = client.delete(
+        f"/api/v1/experiments/{experiment_id}"
+    )
+
+    assert response.status_code == 409
