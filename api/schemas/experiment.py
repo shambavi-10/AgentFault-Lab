@@ -116,3 +116,33 @@ class ExperimentExecutionResponse(BaseModel):
     success_rate: float
     total_execution_time_ms: float
     total_retries: int
+
+class ExperimentComparisonRequest(BaseModel):
+    """Request schema for comparing reliability strategies."""
+
+    scenarios: list[FailureScenarioRequest] = Field(min_length=1)
+
+    strategies: dict[str, ReliabilityConfigRequest] = Field(
+        min_length=1
+    )
+
+
+class StrategyComparisonResponse(BaseModel):
+    """Response schema for one strategy comparison."""
+
+    strategy_name: str
+    experiment_execution: ExperimentExecutionResponse
+    success_rate: float
+    average_execution_time_ms: float
+    total_retries: int
+    total_fallbacks: int
+    passed_scenarios: int
+    failed_scenarios: int
+
+
+class ExperimentComparisonResponse(BaseModel):
+    """Response schema for the complete comparison."""
+
+    comparisons: list[StrategyComparisonResponse]
+    best_strategy: str
+    total_strategies: int

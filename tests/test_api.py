@@ -461,3 +461,104 @@ def test_get_history_for_nonexistent_experiment(client):
     )
 
     assert response.status_code == 404
+
+# --------------------------------------------------
+# Experiment comparison API tests
+# --------------------------------------------------
+
+def test_compare_experiment_strategies_successfully(client):
+    payload = {
+        "scenarios": [
+            {
+                "name": "Timeout Recovery",
+                "failure_sequence": ["timeout", "none"],
+                "expected_status": "success",
+            }
+        ],
+        "strategies": {
+            "no_retry": {
+                "max_attempts": 1,
+                "retry_strategy": "none",
+                "base_delay": 0.0,
+                "max_delay": 0.0,
+                "jitter": False,
+                "enable_circuit_breaker": False,
+                "failure_threshold": 3,
+                "recovery_timeout": 10.0,
+                "enable_fallback": False,
+            },
+            "retry_enabled": {
+                "max_attempts": 3,
+                "retry_strategy": "exponential",
+                "base_delay": 0.0,
+                "max_delay": 0.0,
+                "jitter": False,
+                "enable_circuit_breaker": False,
+                "failure_threshold": 3,
+                "recovery_timeout": 10.0,
+                "enable_fallback": False,
+            },
+        },
+    }
+
+    response = client.post(
+        "/api/v1/experiments/compare",
+        json=payload,
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total_strategies"] == 2
+    assert data["best_strategy"] in [
+        "no_retry",
+        "retry_enabled",
+    ]
+
+    assert len(data["comparisons"]) == 2
+
+    for comparison in data["comparisons"]:
+        assert comparison["strategy_name"] in [
+            "no_retry",
+            "retry_enabled",
+        ]
+        assert comparison["experiment_execution"]["status"] == "completed"
+        assert comparison["success_rate"] >= 0.0
+        assert comparison["total_retries"] >= 0
+
+
+def test_compare_experiments_without_scenarios(client):
+    payload = {
+        "scenarios": [],
+        "strategies": {
+            "baseline": {}
+        },
+    }
+
+    response = client.post(
+        "/api/v1/experiments/compare",
+        json=payload,
+    )
+
+    assert response.status_code == 422
+
+
+def test_compare_experiments_without_strategies(client):
+    payload = {
+        "scenarios": [
+            {
+                "name": "Normal Execution",
+                "failure_sequence": ["none"],
+                "expected_status": "success",
+            }
+        ],
+        "strategies": {},
+    }
+
+    response = client.post(
+        "/api/v1/experiments/compare",
+        json=payload,
+    )
+
+    assert response.status_code == 422

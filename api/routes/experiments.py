@@ -10,6 +10,9 @@ from api.schemas.experiment import (
     ExecutionTraceResponse,
     ScenarioExecutionResultResponse,
     TraceEventResponse,
+    ExperimentComparisonRequest,
+    ExperimentComparisonResponse,
+    StrategyComparisonResponse,
 )
 
 from agentfault.experiment_manager import ExperimentManager
@@ -18,6 +21,7 @@ from agentfault.scenarios import FailureScenario
 from agentfault.reliability_config import ReliabilityConfig
 from agentfault.experiment_executor import execute_experiment
 from api.execution_dependencies import get_execution_results_store
+from agentfault.experiment_comparator import compare_experiments
 
 router = APIRouter(
     prefix="/api/v1/experiments",
@@ -268,5 +272,92 @@ def get_experiment_history(
     except KeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+@router.post(
+    "/compare",
+    response_model=ExperimentComparisonResponse,
+)
+def compare_experiment_strategies(
+    request: ExperimentComparisonRequest,
+):
+    """Compare multiple reliability strategies."""
+
+    try:
+        scenarios = [
+            FailureScenario(**scenario.model_dump())
+            for scenario in request.scenarios
+        ]
+
+        strategies = {
+            name: ReliabilityConfig(**config.model_dump())
+            for name, config in request.strategies.items()
+        }
+
+        comparison = compare_experiments(
+            scenarios=scenarios,
+            strategies=strategies,
+        )
+
+        return ExperimentComparisonResponse(
+            comparisons=[
+                StrategyComparisonResponse(
+                    strategy_name=item.strategy_name,
+                    experiment_execution=ExperimentExecutionResponse(
+                        experiment_id=item.experiment_execution.experiment_id,
+                        experiment_name=item.experiment_execution.experiment_name,
+                        status=item.experiment_execution.status,
+                        scenario_results=[
+                            ScenarioExecutionResultResponse(
+                                scenario_name=result.scenario_name,
+                                expected_status=result.expected_status,
+                                result=result.result.model_dump(),
+                                trace=ExecutionTraceResponse(
+                                    execution_id=result.trace.execution_id,
+                                    events=[
+                                        TraceEventResponse(**event)
+                                        for event in result.trace.get_events()
+                                    ],
+                                ),
+                                execution_time_ms=result.execution_time_ms,
+                                retry_count=result.retry_count,
+                                fallback_count=result.fallback_count,
+                                fallback_used=result.fallback_used,
+                                circuit_breaker_enabled=result.circuit_breaker_enabled,
+                                valid_business_result=result.valid_business_result,
+                                passed=result.passed,
+                            )
+                            for result in item.experiment_execution.scenario_results
+                        ],
+                        total_scenarios=item.experiment_execution.total_scenarios,
+                        passed_scenarios=item.experiment_execution.passed_scenarios,
+                        failed_scenarios=item.experiment_execution.failed_scenarios,
+                        success_rate=item.experiment_execution.success_rate,
+                        total_execution_time_ms=item.experiment_execution.total_execution_time_ms,
+                        total_retries=item.experiment_execution.total_retries,
+                    ),
+                    success_rate=item.success_rate,
+                    average_execution_time_ms=item.average_execution_time_ms,
+                    total_retries=item.total_retries,
+                    total_fallbacks=item.total_fallbacks,
+                    passed_scenarios=item.passed_scenarios,
+                    failed_scenarios=item.failed_scenarios,
+                )
+                for item in comparison.comparisons
+            ],
+            best_strategy=comparison.best_strategy,
+            total_strategies=comparison.total_strategies,
+        )
+
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
