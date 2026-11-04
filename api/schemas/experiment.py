@@ -146,3 +146,31 @@ class ExperimentComparisonResponse(BaseModel):
     comparisons: list[StrategyComparisonResponse]
     best_strategy: str
     total_strategies: int
+
+class BenchmarkAnalyticsResponse(BaseModel):
+    """Response schema for experiment benchmark analytics."""
+
+    experiment_id: str
+    experiment_name: str
+
+    total_scenarios: int
+    passed_scenarios: int
+    failed_scenarios: int
+
+    success_rate: float
+    failure_rate: float
+
+    average_latency_ms: float
+    minimum_latency_ms: float
+    maximum_latency_ms: float
+
+    p50_latency_ms: float
+    p90_latency_ms: float
+    p95_latency_ms: float
+    p99_latency_ms: float
+
+    total_retries: int
+    average_retries: float
+
+    total_fallbacks: int
+    fallback_usage_rate: float

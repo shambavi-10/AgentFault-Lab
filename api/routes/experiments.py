@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.experiment_dependencies import get_experiment_manager
 
+
 from api.schemas.experiment import (
     ExperimentCreateRequest,
     ExperimentResponse,
@@ -13,6 +14,7 @@ from api.schemas.experiment import (
     ExperimentComparisonRequest,
     ExperimentComparisonResponse,
     StrategyComparisonResponse,
+    BenchmarkAnalyticsResponse,
 )
 
 from agentfault.experiment_manager import ExperimentManager
@@ -22,6 +24,7 @@ from agentfault.reliability_config import ReliabilityConfig
 from agentfault.experiment_executor import execute_experiment
 from api.execution_dependencies import get_execution_results_store
 from agentfault.experiment_comparator import compare_experiments
+from agentfault.benchmark_analytics import calculate_benchmark_analytics
 
 router = APIRouter(
     prefix="/api/v1/experiments",
@@ -359,5 +362,47 @@ def compare_experiment_strategies(
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+@router.get(
+    "/{experiment_id}/analytics",
+    response_model=BenchmarkAnalyticsResponse,
+)
+def get_experiment_analytics(
+    experiment_id: str,
+    manager: ExperimentManager = Depends(get_experiment_manager),
+):
+    """Retrieve benchmark analytics for the latest experiment execution."""
+
+    try:
+        manager.get_experiment(experiment_id)
+
+        results_store = get_execution_results_store()
+        execution_history = results_store.get(experiment_id, [])
+
+        if not execution_history:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No execution results found for this experiment",
+            )
+
+        latest_execution = execution_history[-1]
+
+        analytics = calculate_benchmark_analytics(
+            latest_execution,
+        )
+
+        return BenchmarkAnalyticsResponse(**analytics.__dict__)
+
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc

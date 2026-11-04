@@ -562,3 +562,87 @@ def test_compare_experiments_without_strategies(client):
     )
 
     assert response.status_code == 422
+
+    # --------------------------------------------------
+# Benchmark analytics API tests
+# --------------------------------------------------
+
+def test_get_experiment_analytics_successfully(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "Analytics Test",
+            "description": "Test benchmark analytics",
+            "scenarios": [
+                {
+                    "name": "Normal Execution",
+                    "failure_sequence": ["none"],
+                    "expected_status": "success",
+                }
+            ],
+        },
+    )
+
+    assert create_response.status_code == 201
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    run_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/run"
+    )
+
+    assert run_response.status_code == 200
+
+    response = client.get(
+        f"/api/v1/experiments/{experiment_id}/analytics"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["experiment_id"] == experiment_id
+    assert data["total_scenarios"] == 1
+    assert data["passed_scenarios"] + data["failed_scenarios"] == 1
+    assert 0.0 <= data["success_rate"] <= 1.0
+    assert 0.0 <= data["failure_rate"] <= 1.0
+    assert data["average_latency_ms"] >= 0.0
+    assert data["p50_latency_ms"] >= 0.0
+    assert data["p90_latency_ms"] >= 0.0
+    assert data["p95_latency_ms"] >= 0.0
+    assert data["p99_latency_ms"] >= 0.0
+
+
+def test_get_analytics_without_execution_results(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "No Results Test",
+            "description": "Test missing execution results",
+            "scenarios": [
+                {
+                    "name": "Normal Execution",
+                    "failure_sequence": ["none"],
+                    "expected_status": "success",
+                }
+            ],
+        },
+    )
+
+    assert create_response.status_code == 201
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    response = client.get(
+        f"/api/v1/experiments/{experiment_id}/analytics"
+    )
+
+    assert response.status_code == 404
+
+
+def test_get_analytics_for_nonexistent_experiment(client):
+    response = client.get(
+        "/api/v1/experiments/nonexistent-id/analytics"
+    )
+
+    assert response.status_code == 404
