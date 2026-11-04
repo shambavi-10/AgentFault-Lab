@@ -1,8 +1,9 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from api.dependencies import get_report_manager
 from api.experiment_dependencies import get_experiment_manager
-
+from api.execution_dependencies import get_execution_results_store
 
 from api.schemas.experiment import (
     ExperimentCreateRequest,
@@ -15,22 +16,41 @@ from api.schemas.experiment import (
     ExperimentComparisonResponse,
     StrategyComparisonResponse,
     BenchmarkAnalyticsResponse,
+    BenchmarkReportResponse,
 )
 
 from agentfault.experiment_manager import ExperimentManager
 from agentfault.experiment import Experiment
 from agentfault.scenarios import FailureScenario
 from agentfault.reliability_config import ReliabilityConfig
-from agentfault.experiment_executor import execute_experiment
-from api.execution_dependencies import get_execution_results_store
+
+from agentfault.experiment_executor import (
+    execute_experiment,
+    ExperimentExecution,
+    ScenarioExecutionResult,
+)
+
 from agentfault.experiment_comparator import compare_experiments
 from agentfault.benchmark_analytics import calculate_benchmark_analytics
+from agentfault.benchmark_report import (
+    generate_benchmark_report,
+    export_benchmark_report_json,
+)
+from agentfault.report_manager import ReportManager
+
+from agentfault.models import ToolResult
+from agentfault.tracing import ExecutionTrace, TraceEvent
+
 
 router = APIRouter(
     prefix="/api/v1/experiments",
     tags=["Experiments"],
 )
 
+
+# --------------------------------------------------
+# Conversion helpers
+# --------------------------------------------------
 
 def convert_experiment(experiment: Experiment) -> ExperimentResponse:
     """Convert an Experiment object into an API response."""
@@ -52,6 +72,56 @@ def convert_experiment(experiment: Experiment) -> ExperimentResponse:
         reliability_config=experiment.reliability_config.__dict__,
     )
 
+
+def convert_execution_response(
+    response: ExperimentExecutionResponse,
+) -> ExperimentExecution:
+    """Convert an API execution response into the engine dataclass."""
+
+    scenario_results = []
+
+    for result in response.scenario_results:
+        trace = ExecutionTrace(
+            execution_id=result.trace.execution_id,
+            events=[
+                TraceEvent(**event.model_dump())
+                for event in result.trace.events
+            ],
+        )
+
+        scenario_results.append(
+            ScenarioExecutionResult(
+                scenario_name=result.scenario_name,
+                expected_status=result.expected_status,
+                result=ToolResult(**result.result),
+                trace=trace,
+                execution_time_ms=result.execution_time_ms,
+                retry_count=result.retry_count,
+                fallback_count=result.fallback_count,
+                fallback_used=result.fallback_used,
+                circuit_breaker_enabled=result.circuit_breaker_enabled,
+                valid_business_result=result.valid_business_result,
+                passed=result.passed,
+            )
+        )
+
+    return ExperimentExecution(
+        experiment_id=response.experiment_id,
+        experiment_name=response.experiment_name,
+        status=response.status,
+        scenario_results=scenario_results,
+        total_scenarios=response.total_scenarios,
+        passed_scenarios=response.passed_scenarios,
+        failed_scenarios=response.failed_scenarios,
+        success_rate=response.success_rate,
+        total_execution_time_ms=response.total_execution_time_ms,
+        total_retries=response.total_retries,
+    )
+
+
+# --------------------------------------------------
+# Experiment management APIs
+# --------------------------------------------------
 
 @router.post(
     "",
@@ -81,7 +151,6 @@ def create_experiment(
             reliability_config=config,
         )
 
-
         return convert_experiment(experiment)
 
     except (ValueError, TypeError) as exc:
@@ -100,8 +169,6 @@ def list_experiments(
 ):
     """Return all registered experiments."""
 
-
-
     return [
         convert_experiment(experiment)
         for experiment in manager.list_experiments()
@@ -117,8 +184,6 @@ def get_experiment(
     manager: ExperimentManager = Depends(get_experiment_manager),
 ):
     """Retrieve one experiment by ID."""
-
-
 
     try:
         experiment = manager.get_experiment(experiment_id)
@@ -157,6 +222,10 @@ def delete_experiment(
         ) from exc
 
 
+# --------------------------------------------------
+# Experiment execution API
+# --------------------------------------------------
+
 @router.post(
     "/{experiment_id}/run",
     response_model=ExperimentExecutionResponse,
@@ -165,7 +234,7 @@ def run_experiment(
     experiment_id: str,
     manager: ExperimentManager = Depends(get_experiment_manager),
 ):
-    """Execute an experiment and store its latest results."""
+    """Execute an experiment and store its results."""
 
     try:
         experiment = manager.get_experiment(experiment_id)
@@ -211,6 +280,7 @@ def run_experiment(
             results_store[experiment_id] = []
 
         results_store[experiment_id].append(response)
+
         return response
 
     except KeyError as exc:
@@ -225,6 +295,11 @@ def run_experiment(
             detail=str(exc),
         ) from exc
 
+
+# --------------------------------------------------
+# Experiment results API
+# --------------------------------------------------
+
 @router.get(
     "/{experiment_id}/results",
     response_model=ExperimentExecutionResponse,
@@ -233,7 +308,7 @@ def get_experiment_results(
     experiment_id: str,
     manager: ExperimentManager = Depends(get_experiment_manager),
 ):
-    """Retrieve the latest execution results for an experiment."""
+    """Retrieve the latest execution results."""
 
     try:
         manager.get_experiment(experiment_id)
@@ -254,6 +329,8 @@ def get_experiment_results(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+
+
 @router.get(
     "/{experiment_id}/history",
     response_model=list[ExperimentExecutionResponse],
@@ -277,6 +354,11 @@ def get_experiment_history(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+
+
+# --------------------------------------------------
+# Experiment comparison API
+# --------------------------------------------------
 
 @router.post(
     "/compare",
@@ -365,6 +447,11 @@ def compare_experiment_strategies(
             detail=str(exc),
         ) from exc
 
+
+# --------------------------------------------------
+# Benchmark analytics API
+# --------------------------------------------------
+
 @router.get(
     "/{experiment_id}/analytics",
     response_model=BenchmarkAnalyticsResponse,
@@ -373,7 +460,7 @@ def get_experiment_analytics(
     experiment_id: str,
     manager: ExperimentManager = Depends(get_experiment_manager),
 ):
-    """Retrieve benchmark analytics for the latest experiment execution."""
+    """Retrieve benchmark analytics for the latest execution."""
 
     try:
         manager.get_experiment(experiment_id)
@@ -387,13 +474,167 @@ def get_experiment_analytics(
                 detail="No execution results found for this experiment",
             )
 
-        latest_execution = execution_history[-1]
-
-        analytics = calculate_benchmark_analytics(
-            latest_execution,
+        latest_execution = convert_execution_response(
+            execution_history[-1]
         )
 
+        analytics = calculate_benchmark_analytics(latest_execution)
+
         return BenchmarkAnalyticsResponse(**analytics.__dict__)
+
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+# --------------------------------------------------
+# Benchmark report generation API
+# --------------------------------------------------
+
+@router.post(
+    "/{experiment_id}/report",
+    response_model=BenchmarkReportResponse,
+)
+def generate_experiment_report(
+    experiment_id: str,
+    manager: ExperimentManager = Depends(get_experiment_manager),
+    report_manager: ReportManager = Depends(get_report_manager),
+):
+    """Generate and persist a benchmark report."""
+
+    try:
+        manager.get_experiment(experiment_id)
+
+        results_store = get_execution_results_store()
+        execution_history = results_store.get(experiment_id, [])
+
+        if not execution_history:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No execution results found for this experiment",
+            )
+
+        execution = convert_execution_response(
+            execution_history[-1]
+        )
+
+        analytics = calculate_benchmark_analytics(execution)
+
+        report = generate_benchmark_report(
+            execution=execution,
+            analytics=analytics,
+        )
+
+        report_manager.storage.save_report(report)
+
+        return BenchmarkReportResponse(
+            **export_benchmark_report_json(report)
+        )
+
+    except HTTPException:
+        raise
+
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to generate benchmark report",
+        ) from exc
+
+
+# --------------------------------------------------
+# Benchmark report retrieval API
+# --------------------------------------------------
+
+@router.get(
+    "/{experiment_id}/report",
+    response_model=BenchmarkReportResponse,
+)
+def get_experiment_report(
+    experiment_id: str,
+    manager: ExperimentManager = Depends(get_experiment_manager),
+    report_manager: ReportManager = Depends(get_report_manager),
+):
+    """Retrieve a saved benchmark report."""
+
+    try:
+        manager.get_experiment(experiment_id)
+
+        report = report_manager.get_report(experiment_id)
+
+        if report is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Benchmark report not found",
+            )
+
+        return BenchmarkReportResponse(**report)
+
+    except HTTPException:
+        raise
+
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+# --------------------------------------------------
+# Benchmark report JSON export API
+# --------------------------------------------------
+
+@router.get(
+    "/{experiment_id}/report/json",
+)
+def export_experiment_report_json(
+    experiment_id: str,
+    manager: ExperimentManager = Depends(get_experiment_manager),
+    report_manager: ReportManager = Depends(get_report_manager),
+):
+    """Export a saved benchmark report as JSON."""
+
+    try:
+        manager.get_experiment(experiment_id)
+
+        report = report_manager.get_report(experiment_id)
+
+        if report is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Benchmark report not found",
+            )
+
+        # The stored report is already a JSON-compatible dictionary.
+        return report
+
+    except HTTPException:
+        raise
 
     except KeyError as exc:
         raise HTTPException(

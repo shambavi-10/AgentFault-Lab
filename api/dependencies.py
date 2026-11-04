@@ -36,3 +36,12 @@ def get_dashboard_service() -> DashboardService:
         insights=insights,
         recommendation_manager=recommendation_manager,
     )
+@lru_cache
+def get_report_manager() -> ReportManager:
+    """Create and reuse the report manager."""
+
+    report_storage = ReportStorage(
+        storage_dir="reports"
+    )
+
+    return ReportManager(report_storage)

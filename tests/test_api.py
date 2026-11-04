@@ -646,3 +646,174 @@ def test_get_analytics_for_nonexistent_experiment(client):
     )
 
     assert response.status_code == 404
+
+
+# --------------------------------------------------
+# Benchmark report API tests
+# --------------------------------------------------
+
+def test_generate_benchmark_report_successfully(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "Report Generation Test",
+            "description": "Testing benchmark report generation",
+            "scenarios": [
+                {
+                    "name": "Normal Execution",
+                    "failure_sequence": ["none"],
+                    "expected_status": "success",
+                }
+            ],
+        },
+    )
+
+    assert create_response.status_code == 201
+    experiment_id = create_response.json()["experiment_id"]
+
+    run_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/run"
+    )
+
+    assert run_response.status_code == 200
+
+    response = client.post(
+        f"/api/v1/experiments/{experiment_id}/report"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["experiment_id"] == experiment_id
+    assert data["experiment_name"] == "Report Generation Test"
+    assert data["total_scenarios"] == 1
+    assert len(data["scenario_reports"]) == 1
+
+
+def test_generate_report_without_execution_results(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "No Execution Report Test",
+            "description": "Testing missing execution results",
+            "scenarios": [
+                {
+                    "name": "Normal Execution",
+                    "failure_sequence": ["none"],
+                    "expected_status": "success",
+                }
+            ],
+        },
+    )
+
+    assert create_response.status_code == 201
+    experiment_id = create_response.json()["experiment_id"]
+
+    response = client.post(
+        f"/api/v1/experiments/{experiment_id}/report"
+    )
+
+    assert response.status_code == 404
+
+
+def test_get_saved_benchmark_report(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "Saved Report Test",
+            "description": "Testing report retrieval",
+            "scenarios": [
+                {
+                    "name": "Normal Execution",
+                    "failure_sequence": ["none"],
+                    "expected_status": "success",
+                }
+            ],
+        },
+    )
+
+    assert create_response.status_code == 201
+    experiment_id = create_response.json()["experiment_id"]
+
+    run_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/run"
+    )
+
+    assert run_response.status_code == 200
+
+    generate_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/report"
+    )
+
+    assert generate_response.status_code == 200
+
+    response = client.get(
+        f"/api/v1/experiments/{experiment_id}/report"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["experiment_id"] == experiment_id
+    assert data["experiment_name"] == "Saved Report Test"
+
+
+def test_export_benchmark_report_json(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "JSON Export Test",
+            "description": "Testing JSON report export",
+            "scenarios": [
+                {
+                    "name": "Normal Execution",
+                    "failure_sequence": ["none"],
+                    "expected_status": "success",
+                }
+            ],
+        },
+    )
+
+    assert create_response.status_code == 201
+    experiment_id = create_response.json()["experiment_id"]
+
+    run_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/run"
+    )
+
+    assert run_response.status_code == 200
+
+    generate_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/report"
+    )
+
+    assert generate_response.status_code == 200
+
+    response = client.get(
+        f"/api/v1/experiments/{experiment_id}/report/json"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["experiment_id"] == experiment_id
+    assert "scenario_reports" in data
+
+
+def test_get_nonexistent_benchmark_report(client):
+    response = client.get(
+        "/api/v1/experiments/nonexistent-id/report"
+    )
+
+    assert response.status_code == 404
+
+
+def test_export_nonexistent_benchmark_report(client):
+    response = client.get(
+        "/api/v1/experiments/nonexistent-id/report/json"
+    )
+
+    assert response.status_code == 404

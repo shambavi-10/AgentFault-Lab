@@ -174,3 +174,46 @@ class BenchmarkAnalyticsResponse(BaseModel):
 
     total_fallbacks: int
     fallback_usage_rate: float
+
+class ScenarioReportResponse(BaseModel):
+    """Response schema for an individual scenario report."""
+
+    scenario_name: str
+    expected_status: str
+    actual_status: str
+    passed: bool
+    execution_time_ms: float
+    retry_count: int
+    fallback_count: int
+
+
+class BenchmarkReportResponse(BaseModel):
+    """Response schema for a complete benchmark report."""
+
+    experiment_id: str
+    experiment_name: str
+    experiment_status: str
+
+    total_scenarios: int
+    passed_scenarios: int
+    failed_scenarios: int
+
+    success_rate: float
+    failure_rate: float
+
+    average_latency_ms: float
+    minimum_latency_ms: float
+    maximum_latency_ms: float
+
+    p50_latency_ms: float
+    p90_latency_ms: float
+    p95_latency_ms: float
+    p99_latency_ms: float
+
+    total_retries: int
+    average_retries: float
+
+    total_fallbacks: int
+    fallback_usage_rate: float
+
+    scenario_reports: list[ScenarioReportResponse]
