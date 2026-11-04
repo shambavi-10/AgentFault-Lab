@@ -17,7 +17,7 @@ from agentfault.experiment import Experiment
 from agentfault.scenarios import FailureScenario
 from agentfault.reliability_config import ReliabilityConfig
 from agentfault.experiment_executor import execute_experiment
-
+from api.execution_dependencies import get_execution_results_store
 
 router = APIRouter(
     prefix="/api/v1/experiments",
@@ -158,16 +158,13 @@ def run_experiment(
     experiment_id: str,
     manager: ExperimentManager = Depends(get_experiment_manager),
 ):
-    """Execute an experiment and return its results."""
-
-
+    """Execute an experiment and store its latest results."""
 
     try:
         experiment = manager.get_experiment(experiment_id)
-
         execution = execute_experiment(experiment)
 
-        return ExperimentExecutionResponse(
+        response = ExperimentExecutionResponse(
             experiment_id=execution.experiment_id,
             experiment_name=execution.experiment_name,
             status=execution.status,
@@ -201,6 +198,11 @@ def run_experiment(
             total_retries=execution.total_retries,
         )
 
+        results_store = get_execution_results_store()
+        results_store[experiment_id] = response
+
+        return response
+
     except KeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -210,5 +212,35 @@ def run_experiment(
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+@router.get(
+    "/{experiment_id}/results",
+    response_model=ExperimentExecutionResponse,
+)
+def get_experiment_results(
+    experiment_id: str,
+    manager: ExperimentManager = Depends(get_experiment_manager),
+):
+    """Retrieve the latest execution results for an experiment."""
+
+    try:
+        manager.get_experiment(experiment_id)
+
+        results_store = get_execution_results_store()
+        result = results_store.get(experiment_id)
+
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No execution results found for this experiment",
+            )
+
+        return result
+
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc

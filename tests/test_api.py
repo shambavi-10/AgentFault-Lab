@@ -8,15 +8,16 @@ import api.main as main
 from api.experiment_dependencies import get_experiment_manager
 from agentfault.experiment_manager import ExperimentManager
 from agentfault.dashboard_service import DashboardServiceError
-
+from api.execution_dependencies import get_execution_results_store
 
 @pytest.fixture
 def experiment_manager():
     return ExperimentManager()
 
-
 @pytest.fixture
 def client(experiment_manager):
+    get_execution_results_store().clear()
+
     main.app.dependency_overrides[get_experiment_manager] = (
         lambda: experiment_manager
     )
@@ -25,7 +26,6 @@ def client(experiment_manager):
         yield test_client
 
     main.app.dependency_overrides.clear()
-
 
 def valid_experiment_payload():
     return {
@@ -346,3 +346,63 @@ def test_run_experiment_updates_experiment_status(client):
 
     assert get_response.status_code == 200
     assert get_response.json()["status"] == "completed"
+
+# --------------------------------------------------
+# Experiment results retrieval tests
+# --------------------------------------------------
+
+def test_get_experiment_results_successfully(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    run_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/run"
+    )
+
+    assert run_response.status_code == 200
+
+    response = client.get(
+        f"/api/v1/experiments/{experiment_id}/results"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["experiment_id"] == experiment_id
+    assert data["experiment_name"] == "API Experiment Test"
+    assert data["status"] == "completed"
+    assert data["total_scenarios"] == 2
+    assert data["passed_scenarios"] == 2
+    assert data["success_rate"] == 1.0
+    assert len(data["scenario_results"]) == 2
+
+
+def test_get_results_before_experiment_execution(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json=valid_experiment_payload(),
+    )
+
+    experiment_id = create_response.json()["experiment_id"]
+
+    response = client.get(
+        f"/api/v1/experiments/{experiment_id}/results"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == (
+        "No execution results found for this experiment"
+    )
+
+
+def test_get_results_for_nonexistent_experiment(client):
+    response = client.get(
+        "/api/v1/experiments/nonexistent-id/results"
+    )
+
+    assert response.status_code == 404
