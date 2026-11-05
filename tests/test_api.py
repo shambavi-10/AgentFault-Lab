@@ -9,17 +9,27 @@ from api.experiment_dependencies import get_experiment_manager
 from agentfault.experiment_manager import ExperimentManager
 from agentfault.dashboard_service import DashboardServiceError
 from api.execution_dependencies import get_execution_results_store
+from api.dependencies import get_recommendation_manager
+from agentfault.recommendation_manager import RecommendationManager
 
 @pytest.fixture
 def experiment_manager():
     return ExperimentManager()
 
 @pytest.fixture
-def client(experiment_manager):
+def client(experiment_manager, tmp_path):
     get_execution_results_store().clear()
+
+    recommendation_manager = RecommendationManager(
+        storage_path=tmp_path / "recommendations.json"
+    )
 
     main.app.dependency_overrides[get_experiment_manager] = (
         lambda: experiment_manager
+    )
+
+    main.app.dependency_overrides[get_recommendation_manager] = (
+        lambda: recommendation_manager
     )
 
     with TestClient(main.app) as test_client:
@@ -817,3 +827,95 @@ def test_export_nonexistent_benchmark_report(client):
     )
 
     assert response.status_code == 404
+
+# --------------------------------------------------
+# Day 37 - Recommendation API tests
+# --------------------------------------------------
+
+def test_generate_recommendations_successfully(client):
+    create_response = client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "Recommendation API Test",
+            "description": "Testing recommendation generation",
+            "scenarios": [
+                {
+                    "name": "Normal Execution",
+                    "failure_sequence": ["none"],
+                    "expected_status": "success",
+                }
+            ],
+        },
+    )
+
+    assert create_response.status_code == 201
+    experiment_id = create_response.json()["experiment_id"]
+
+    run_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/run"
+    )
+    assert run_response.status_code == 200
+
+    report_response = client.post(
+        f"/api/v1/experiments/{experiment_id}/report"
+    )
+    assert report_response.status_code == 200
+
+    response = client.post(
+        f"/api/v1/recommendations/generate/{experiment_id}"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["experiment_id"] == experiment_id
+    assert data["total_generated"] >= 1
+    assert len(data["recommendations"]) >= 1
+
+
+def test_generate_recommendations_for_nonexistent_experiment(client):
+    response = client.post(
+        "/api/v1/recommendations/generate/nonexistent-id"
+    )
+
+    assert response.status_code == 404
+
+
+def test_list_recommendations(client):
+    response = client.get("/api/v1/recommendations")
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_get_recommendation_summary(client):
+    response = client.get(
+        "/api/v1/recommendations/summary"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total_recommendations"] == 0
+    assert data["open"] == 0
+    assert data["in_progress"] == 0
+    assert data["resolved"] == 0
+
+
+def test_get_nonexistent_recommendation(client):
+    response = client.get(
+        "/api/v1/recommendations/nonexistent-id"
+    )
+
+    assert response.status_code == 404
+
+
+def test_filter_recommendations_by_invalid_priority(client):
+    response = client.get(
+        "/api/v1/recommendations",
+        params={"priority": "invalid"},
+    )
+
+    assert response.status_code == 422

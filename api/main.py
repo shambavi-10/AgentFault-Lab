@@ -5,7 +5,7 @@ from api.dependencies import get_dashboard_service
 from api.routes.experiments import router as experiment_router
 
 from agentfault.dashboard_service import DashboardServiceError
-
+from api.routes.recommendations import router as recommendation_router
 
 app = FastAPI(
     title="AgentFault Lab API",
@@ -16,7 +16,7 @@ app = FastAPI(
 
 app.include_router(experiment_router)
 
-
+app.include_router(recommendation_router)
 @app.get("/")
 def root():
     """Return basic API information."""

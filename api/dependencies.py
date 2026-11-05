@@ -7,7 +7,7 @@ from agentfault.historical_analytics import HistoricalAnalytics
 from agentfault.historical_insights import HistoricalInsights
 from agentfault.recommendation_manager import RecommendationManager
 from agentfault.dashboard_service import DashboardService
-
+from agentfault.recommendation_engine import RecommendationEngine
 
 @lru_cache
 def get_dashboard_service() -> DashboardService:
@@ -45,3 +45,30 @@ def get_report_manager() -> ReportManager:
     )
 
     return ReportManager(report_storage)
+
+@lru_cache
+def get_recommendation_engine() -> RecommendationEngine:
+    """Create and reuse the reliability recommendation engine."""
+
+    report_manager = get_report_manager()
+
+    analytics = HistoricalAnalytics(
+        report_manager
+    )
+
+    insights = HistoricalInsights(
+        analytics
+    )
+
+    return RecommendationEngine(
+        insights=insights
+    )
+
+
+@lru_cache
+def get_recommendation_manager() -> RecommendationManager:
+    """Create and reuse the recommendation manager."""
+
+    return RecommendationManager(
+        storage_path="recommendations.json"
+    )

@@ -217,3 +217,42 @@ class BenchmarkReportResponse(BaseModel):
     fallback_usage_rate: float
 
     scenario_reports: list[ScenarioReportResponse]
+class ReliabilityRecommendationResponse(BaseModel):
+    """Response schema for an individual reliability recommendation."""
+
+    recommendation_id: str
+    experiment_id: str
+    experiment_name: str
+
+    category: str
+    priority: str
+    title: str
+    description: str
+    action: str
+
+    status: str
+    assigned_to: str | None = None
+    notes: list[dict]
+
+    created_at: str
+    updated_at: str
+    resolved_at: str | None = None
+
+
+class RecommendationGenerationResponse(BaseModel):
+    """Response schema for recommendation generation."""
+
+    experiment_id: str
+    total_generated: int
+    recommendations: list[ReliabilityRecommendationResponse]
+
+
+class RecommendationSummaryResponse(BaseModel):
+    """Response schema for recommendation statistics."""
+
+    total_recommendations: int
+    open: int
+    in_progress: int
+    resolved: int
+    resolution_rate: float
+    priority_counts: dict[str, int]
