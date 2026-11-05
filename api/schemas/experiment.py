@@ -256,3 +256,75 @@ class RecommendationSummaryResponse(BaseModel):
     resolved: int
     resolution_rate: float
     priority_counts: dict[str, int]
+
+class ReliabilityInsightsResponse(BaseModel):
+    """Response schema for experiment reliability insights."""
+
+    experiment_id: str
+    experiment_name: str
+
+    reliability_score: float
+    risk_level: str
+
+    success_score: float
+    latency_score: float
+    retry_score: float
+    fallback_score: float
+
+    issues: list[str]
+    recommendations: list[str]
+
+
+class SuccessRateTrendResponse(BaseModel):
+    """Response schema for historical success-rate trends."""
+
+    experiment_id: str
+    experiment_name: str
+    success_rate: float
+
+
+class LatencyTrendResponse(BaseModel):
+    """Response schema for historical latency trends."""
+
+    experiment_id: str
+    experiment_name: str
+    average_latency_ms: float
+
+
+class RetryTrendResponse(BaseModel):
+    """Response schema for historical retry trends."""
+
+    experiment_id: str
+    experiment_name: str
+    total_retries: int
+    average_retries: float
+
+
+class FallbackTrendResponse(BaseModel):
+    """Response schema for historical fallback trends."""
+
+    experiment_id: str
+    experiment_name: str
+    total_fallbacks: int
+    fallback_usage_rate: float
+
+
+class HistoricalSummaryResponse(BaseModel):
+    """Response schema for historical reliability summary."""
+
+    total_experiments: int
+    average_success_rate: float
+    average_latency_ms: float
+    total_retries: int
+    total_fallbacks: int
+
+
+class HistoricalComparisonResponse(BaseModel):
+    """Response schema for historical experiment comparison."""
+
+    first_experiment: str
+    second_experiment: str
+    success_rate_difference: float
+    latency_difference_ms: float
+    retry_difference: int
+    fallback_difference: int

@@ -6,6 +6,7 @@ from api.routes.experiments import router as experiment_router
 
 from agentfault.dashboard_service import DashboardServiceError
 from api.routes.recommendations import router as recommendation_router
+from api.routes.insights import router as insights_router
 
 app = FastAPI(
     title="AgentFault Lab API",
@@ -13,7 +14,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-
+app.include_router(insights_router)
 app.include_router(experiment_router)
 
 app.include_router(recommendation_router)
