@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 
 import api.main as main
 
+
+from agentfault.dashboard_service import DashboardService
 from api.experiment_dependencies import get_experiment_manager
 from agentfault.experiment_manager import ExperimentManager
 from agentfault.dashboard_service import DashboardServiceError
@@ -83,6 +85,25 @@ def client(experiment_manager, tmp_path):
 
     main.app.dependency_overrides.clear()
 
+@pytest.fixture
+def dashboard_service(tmp_path):
+    report_manager = ReportManager(
+        ReportStorage(storage_dir=tmp_path / "dashboard_reports")
+    )
+
+    analytics = HistoricalAnalytics(report_manager)
+    insights = HistoricalInsights(analytics)
+
+    recommendation_manager = RecommendationManager(
+        storage_path=tmp_path / "dashboard_recommendations.json"
+    )
+
+    return DashboardService(
+        analytics=analytics,
+        insights=insights,
+        recommendation_manager=recommendation_manager,
+    )
+
 def valid_experiment_payload():
     return {
         "name": "API Experiment Test",
@@ -140,9 +161,46 @@ def test_dashboard_endpoint(client, monkeypatch):
     expected_data = {
         "experiment_overview": {
             "total_experiments": 4,
+            "completed_experiments": 3,
+            "failed_experiments": 1,
+            "average_success_rate": 0.90,
+            "average_latency_ms": 125.5,
+            "total_retries": 5,
+            "total_fallbacks": 2,
         },
         "reliability_overview": {
             "average_reliability_score": 89.62,
+            "low_risk_experiments": 3,
+            "medium_risk_experiments": 1,
+            "high_risk_experiments": 0,
+            "risk_distribution": {
+                "low": 3,
+                "medium": 1,
+                "high": 0,
+            },
+        },
+        "recommendation_overview": {
+            "total_recommendations": 2,
+            "open": 1,
+            "in_progress": 1,
+            "resolved": 0,
+            "resolution_rate": 0.0,
+            "priority_counts": {
+                "critical": 0,
+                "high": 1,
+                "medium": 1,
+                "low": 0,
+            },
+        },
+        "performance_trends": {
+            "success_rate": [],
+            "latency": [],
+            "retries": [],
+            "fallbacks": [],
+        },
+        "experiment_highlights": {
+            "best_experiment": None,
+            "worst_experiment": None,
         },
     }
 
@@ -160,7 +218,6 @@ def test_dashboard_endpoint(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == expected_data
-
 
 def test_dashboard_error_handling(client, monkeypatch):
     class FakeDashboardService:
@@ -1160,3 +1217,65 @@ def test_compare_nonexistent_historical_experiments(client):
     )
 
     assert response.status_code == 404
+
+# --------------------------------------------------
+# Day 39 - Dashboard Service integration tests
+
+def test_dashboard_service_returns_all_sections(dashboard_service):
+    result = dashboard_service.get_dashboard_data()
+
+    assert "experiment_overview" in result
+    assert "reliability_overview" in result
+    assert "recommendation_overview" in result
+    assert "performance_trends" in result
+    assert "experiment_highlights" in result
+
+
+def test_dashboard_service_experiment_overview(dashboard_service):
+    result = dashboard_service.get_experiment_overview()
+
+    assert result["total_experiments"] >= 0
+    assert result["completed_experiments"] >= 0
+    assert result["failed_experiments"] >= 0
+    assert result["average_success_rate"] >= 0
+    assert result["average_latency_ms"] >= 0
+
+
+def test_dashboard_service_reliability_overview(dashboard_service):
+    result = dashboard_service.get_reliability_overview()
+
+    assert result["average_reliability_score"] >= 0
+    assert result["low_risk_experiments"] >= 0
+    assert result["medium_risk_experiments"] >= 0
+    assert result["high_risk_experiments"] >= 0
+
+    assert set(result["risk_distribution"].keys()) == {
+        "low",
+        "medium",
+        "high",
+    }
+
+
+def test_dashboard_service_recommendation_overview(dashboard_service):
+    result = dashboard_service.get_recommendation_overview()
+
+    assert result["total_recommendations"] >= 0
+    assert result["open"] >= 0
+    assert result["in_progress"] >= 0
+    assert result["resolved"] >= 0
+
+
+def test_dashboard_service_performance_trends(dashboard_service):
+    result = dashboard_service.get_performance_trends()
+
+    assert "success_rate" in result
+    assert "latency" in result
+    assert "retries" in result
+    assert "fallbacks" in result
+
+
+def test_dashboard_service_experiment_highlights(dashboard_service):
+    result = dashboard_service.get_experiment_highlights()
+
+    assert "best_experiment" in result
+    assert "worst_experiment" in result

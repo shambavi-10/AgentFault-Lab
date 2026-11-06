@@ -5,6 +5,7 @@ from api.dependencies import get_dashboard_service
 from api.routes.experiments import router as experiment_router
 
 from agentfault.dashboard_service import DashboardServiceError
+from api.schemas.dashboard import DashboardResponse
 from api.routes.recommendations import router as recommendation_router
 from api.routes.insights import router as insights_router
 
@@ -37,7 +38,10 @@ def health_check():
     }
 
 
-@app.get("/api/v1/dashboard")
+@app.get(
+    "/api/v1/dashboard",
+    response_model=DashboardResponse,
+)
 def get_dashboard():
     """Return aggregated AgentFault Lab dashboard data."""
 
