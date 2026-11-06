@@ -328,3 +328,57 @@ class HistoricalComparisonResponse(BaseModel):
     latency_difference_ms: float
     retry_difference: int
     fallback_difference: int
+# --------------------------------------------------
+# Persistent execution history response schemas
+# --------------------------------------------------
+
+class ExecutionRunSummaryResponse(BaseModel):
+    """Summary of a persisted experiment execution."""
+
+    run_id: str
+    experiment_id: str
+    status: str
+    total_scenarios: int
+    passed_scenarios: int
+    failed_scenarios: int
+    success_rate: float
+    total_execution_time_ms: float
+    total_retries: int
+    created_at: datetime
+
+
+class ExecutionTraceHistoryResponse(BaseModel):
+    """Persisted trace event for a scenario execution."""
+
+    event_id: str
+    execution_id: str
+    event_type: str
+    attempt: int
+    status: str | None = None
+    error_type: str | None = None
+    message: str | None = None
+    duration_ms: float | None = None
+    timestamp: datetime
+
+
+class ScenarioExecutionHistoryResponse(BaseModel):
+    """Persisted result of one scenario execution."""
+
+    result_id: str
+    scenario_name: str
+    expected_status: str
+    result_data: dict
+    execution_time_ms: float
+    retry_count: int
+    fallback_count: int
+    fallback_used: bool
+    circuit_breaker_enabled: bool
+    valid_business_result: bool
+    passed: bool
+    trace_events: list[ExecutionTraceHistoryResponse]
+
+
+class ExecutionRunDetailResponse(ExecutionRunSummaryResponse):
+    """Complete persisted execution history."""
+
+    scenario_results: list[ScenarioExecutionHistoryResponse]

@@ -17,12 +17,17 @@ from api.schemas.experiment import (
     StrategyComparisonResponse,
     BenchmarkAnalyticsResponse,
     BenchmarkReportResponse,
+    ExecutionRunSummaryResponse,
+    ExecutionTraceHistoryResponse,
+    ScenarioExecutionHistoryResponse,
+    ExecutionRunDetailResponse,
 )
 
 from agentfault.experiment_manager import ExperimentManager
 from agentfault.experiment import Experiment
 from agentfault.scenarios import FailureScenario
 from agentfault.reliability_config import ReliabilityConfig
+from agentfault.services.experiment_service import ExperimentService
 
 from agentfault.experiment_executor import (
     execute_experiment,
@@ -237,8 +242,11 @@ def run_experiment(
     """Execute an experiment and store its results."""
 
     try:
-        experiment = manager.get_experiment(experiment_id)
-        execution = execute_experiment(experiment)
+        if isinstance(manager, ExperimentService):
+            execution = manager.run_experiment(experiment_id)
+        else:
+            experiment = manager.get_experiment(experiment_id)
+            execution = execute_experiment(experiment)
 
         response = ExperimentExecutionResponse(
             experiment_id=execution.experiment_id,
@@ -642,6 +650,230 @@ def export_experiment_report_json(
             detail=str(exc),
         ) from exc
 
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+# --------------------------------------------------
+# Persistent execution history APIs
+# --------------------------------------------------
+
+def get_persistent_execution_service(manager):
+    """Ensure persistent execution history is available."""
+
+    if not isinstance(manager, ExperimentService):
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Persistent execution history requires database storage.",
+        )
+
+    return manager
+
+
+@router.get(
+    "/{experiment_id}/runs",
+    response_model=list[ExecutionRunSummaryResponse],
+)
+def get_experiment_runs(
+    experiment_id: str,
+    manager=Depends(get_experiment_manager),
+):
+    """List persistent execution runs for an experiment."""
+
+    service = get_persistent_execution_service(manager)
+
+    try:
+        service.get_experiment(experiment_id)
+
+        runs = service.execution_repository.list_by_experiment(
+            service.session,
+            experiment_id,
+            service.tenant_id,
+        )
+
+        return [
+            ExecutionRunSummaryResponse(
+                run_id=str(run.run_id),
+                experiment_id=str(run.experiment_id),
+                status=run.status,
+                total_scenarios=run.total_scenarios,
+                passed_scenarios=run.passed_scenarios,
+                failed_scenarios=run.failed_scenarios,
+                success_rate=run.success_rate,
+                total_execution_time_ms=run.total_execution_time_ms,
+                total_retries=run.total_retries,
+                created_at=run.created_at,
+            )
+            for run in runs
+        ]
+
+    except HTTPException:
+        raise
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/{experiment_id}/runs/{run_id}",
+    response_model=ExecutionRunDetailResponse,
+)
+def get_execution_run_details(
+    experiment_id: str,
+    run_id: str,
+    manager=Depends(get_experiment_manager),
+):
+    """Retrieve complete persistent execution history."""
+
+    service = get_persistent_execution_service(manager)
+
+    try:
+        service.get_experiment(experiment_id)
+
+        run = service.execution_repository.get_by_id(
+            service.session,
+            run_id,
+            service.tenant_id,
+        )
+
+        if run is None or str(run.experiment_id) != experiment_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Execution run not found",
+            )
+
+        return ExecutionRunDetailResponse(
+            run_id=str(run.run_id),
+            experiment_id=str(run.experiment_id),
+            status=run.status,
+            total_scenarios=run.total_scenarios,
+            passed_scenarios=run.passed_scenarios,
+            failed_scenarios=run.failed_scenarios,
+            success_rate=run.success_rate,
+            total_execution_time_ms=run.total_execution_time_ms,
+            total_retries=run.total_retries,
+            created_at=run.created_at,
+            scenario_results=[
+                ScenarioExecutionHistoryResponse(
+                    result_id=str(result.result_id),
+                    scenario_name=result.scenario_name,
+                    expected_status=result.expected_status,
+                    result_data=result.result_data,
+                    execution_time_ms=result.execution_time_ms,
+                    retry_count=result.retry_count,
+                    fallback_count=result.fallback_count,
+                    fallback_used=result.fallback_used,
+                    circuit_breaker_enabled=result.circuit_breaker_enabled,
+                    valid_business_result=result.valid_business_result,
+                    passed=result.passed,
+                    trace_events=[
+                        ExecutionTraceHistoryResponse(
+                            event_id=str(event.event_id),
+                            execution_id=event.execution_id,
+                            event_type=event.event_type,
+                            attempt=event.attempt,
+                            status=event.status,
+                            error_type=event.error_type,
+                            message=event.message,
+                            duration_ms=event.duration_ms,
+                            timestamp=event.timestamp,
+                        )
+                        for event in result.trace_events
+                    ],
+                )
+                for result in run.scenario_results
+            ],
+        )
+
+    except HTTPException:
+        raise
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/{experiment_id}/runs/{run_id}/traces",
+    response_model=list[ScenarioExecutionHistoryResponse],
+)
+def get_execution_run_traces(
+    experiment_id: str,
+    run_id: str,
+    manager=Depends(get_experiment_manager),
+):
+    """Retrieve scenario results and their execution traces."""
+
+    service = get_persistent_execution_service(manager)
+
+    try:
+        service.get_experiment(experiment_id)
+
+        run = service.execution_repository.get_by_id(
+            service.session,
+            run_id,
+            service.tenant_id,
+        )
+
+        if run is None or str(run.experiment_id) != experiment_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Execution run not found",
+            )
+
+        return [
+            ScenarioExecutionHistoryResponse(
+                result_id=str(result.result_id),
+                scenario_name=result.scenario_name,
+                expected_status=result.expected_status,
+                result_data=result.result_data,
+                execution_time_ms=result.execution_time_ms,
+                retry_count=result.retry_count,
+                fallback_count=result.fallback_count,
+                fallback_used=result.fallback_used,
+                circuit_breaker_enabled=result.circuit_breaker_enabled,
+                valid_business_result=result.valid_business_result,
+                passed=result.passed,
+                trace_events=[
+                    ExecutionTraceHistoryResponse(
+                        event_id=str(event.event_id),
+                        execution_id=event.execution_id,
+                        event_type=event.event_type,
+                        attempt=event.attempt,
+                        status=event.status,
+                        error_type=event.error_type,
+                        message=event.message,
+                        duration_ms=event.duration_ms,
+                        timestamp=event.timestamp,
+                    )
+                    for event in result.trace_events
+                ],
+            )
+            for result in run.scenario_results
+        ]
+
+    except HTTPException:
+        raise
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
