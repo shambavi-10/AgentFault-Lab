@@ -1,4 +1,4 @@
-﻿import uuid
+import uuid
 from datetime import datetime
 from typing import Union
 
@@ -145,6 +145,29 @@ class ExecutionRepository:
             )
             .where(
                 ExperimentRunModel.experiment_id == experiment_uuid,
+                ExperimentModel.tenant_id == tenant_uuid,
+            )
+            .order_by(ExperimentRunModel.created_at.desc())
+        )
+
+        return list(session.scalars(statement).all())
+
+    def list_by_tenant(
+        self,
+        session: Session,
+        tenant_id: Union[str, uuid.UUID],
+    ) -> list[ExperimentRunModel]:
+        """List all execution runs belonging to a tenant."""
+
+        tenant_uuid = self._to_uuid(tenant_id)
+
+        statement = (
+            select(ExperimentRunModel)
+            .join(ExperimentModel)
+            .options(
+                selectinload(ExperimentRunModel.scenario_results)
+            )
+            .where(
                 ExperimentModel.tenant_id == tenant_uuid,
             )
             .order_by(ExperimentRunModel.created_at.desc())

@@ -732,3 +732,96 @@ def test_service_run_persists_complete_execution_history(
             == uuid.UUID(experiment.experiment_id)
         )
     ) is not None
+
+
+# EXECUTION REPOSITORY TENANT-WIDE LISTING TESTS
+
+def test_list_execution_runs_by_tenant(db_session, tenant):
+    from agentfault.database.repositories.execution_repository import (
+        ExecutionRepository,
+    )
+    from agentfault.services.experiment_service import ExperimentService
+
+    service = ExperimentService(
+        db_session,
+        str(tenant.tenant_id),
+    )
+    repository = ExecutionRepository()
+
+    experiments = [
+        service.create_experiment(
+            name=f"Analytics Experiment {index}",
+            scenarios=[
+                make_scenario(
+                    name=f"Scenario {index}",
+                    failure_sequence=["none"],
+                )
+            ],
+        )
+        for index in range(2)
+    ]
+
+    for experiment in experiments:
+        service.run_experiment(experiment.experiment_id)
+
+    runs = repository.list_by_tenant(
+        db_session,
+        tenant.tenant_id,
+    )
+
+    assert len(runs) == 2
+    assert {
+        str(run.experiment_id) for run in runs
+    } == {
+        str(experiment.experiment_id)
+        for experiment in experiments
+    }
+
+
+def test_execution_run_listing_is_tenant_scoped(
+    db_session,
+    tenant,
+    tenant_repository,
+):
+    from agentfault.database.repositories.execution_repository import (
+        ExecutionRepository,
+    )
+    from agentfault.services.experiment_service import ExperimentService
+
+    own_service = ExperimentService(
+        db_session,
+        str(tenant.tenant_id),
+    )
+
+    other_tenant = tenant_repository.create(
+        db_session,
+        "Other Analytics Organization",
+    )
+
+    other_service = ExperimentService(
+        db_session,
+        str(other_tenant.tenant_id),
+    )
+
+    for service, name in [
+        (own_service, "Own Tenant Experiment"),
+        (other_service, "Other Tenant Experiment"),
+    ]:
+        experiment = service.create_experiment(
+            name=name,
+            scenarios=[
+                make_scenario(
+                    name="Successful scenario",
+                    failure_sequence=["none"],
+                )
+            ],
+        )
+        service.run_experiment(experiment.experiment_id)
+
+    runs = ExecutionRepository().list_by_tenant(
+        db_session,
+        tenant.tenant_id,
+    )
+
+    assert len(runs) == 1
+    assert runs[0].experiment.tenant_id == tenant.tenant_id
