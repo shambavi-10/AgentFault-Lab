@@ -1,4 +1,4 @@
-﻿
+
 import os
 import uuid
 
@@ -651,6 +651,55 @@ def test_service_run_persists_failed_status(
 
     assert persisted.status == "failed"
 
+
+def test_service_run_persists_failed_execution_history(
+    db_session, tenant, monkeypatch
+):
+    import agentfault.services.experiment_service as service_module
+
+    from sqlalchemy import select
+    from agentfault.database.models.experiment_run import (
+        ExperimentRunModel,
+    )
+
+    service = ExperimentService(
+        db_session,
+        str(tenant.tenant_id),
+    )
+
+    experiment = service.create_experiment(
+        name="Failed Execution History Test",
+        scenarios=[make_scenario()],
+    )
+
+    def simulate_failure(experiment):
+        experiment.start()
+        experiment.fail()
+        raise RuntimeError("Simulated execution failure")
+
+    monkeypatch.setattr(
+        service_module,
+        "execute_experiment",
+        simulate_failure,
+    )
+
+    with pytest.raises(RuntimeError, match="Simulated execution failure"):
+        service.run_experiment(experiment.experiment_id)
+
+    failed_run = db_session.scalar(
+        select(ExperimentRunModel).where(
+            ExperimentRunModel.experiment_id
+            == uuid.UUID(experiment.experiment_id)
+        )
+    )
+
+    assert failed_run is not None
+    assert failed_run.status == "failed"
+    assert failed_run.total_scenarios == 0
+    assert failed_run.passed_scenarios == 0
+    assert failed_run.failed_scenarios == 0
+
+
 def test_service_run_persists_complete_execution_history(
     db_session, tenant
 ):
@@ -825,3 +874,613 @@ def test_execution_run_listing_is_tenant_scoped(
 
     assert len(runs) == 1
     assert runs[0].experiment.tenant_id == tenant.tenant_id
+
+# --------------------------------------------------
+# EXPERIMENT REPOSITORY EDGE CASE TESTS
+# --------------------------------------------------
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [
+        "invalid-uuid",
+        "",
+        None,
+        object(),
+    ],
+)
+def test_experiment_repository_rejects_invalid_uuid(
+    invalid_value,
+):
+    with pytest.raises(ValueError, match="Invalid UUID"):
+        ExperimentRepository._to_uuid(invalid_value)
+
+
+def test_create_rejects_invalid_experiment_type(
+    db_session,
+    tenant,
+    experiment_repository,
+):
+    with pytest.raises(
+        TypeError,
+        match="Expected an Experiment instance",
+    ):
+        experiment_repository.create(
+            db_session,
+            "invalid experiment",
+            tenant.tenant_id,
+        )
+
+
+def test_create_rejects_duplicate_experiment(
+    db_session,
+    tenant,
+    experiment_repository,
+):
+    experiment = make_experiment()
+
+    experiment_repository.create(
+        db_session,
+        experiment,
+        tenant.tenant_id,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Experiment already exists",
+    ):
+        experiment_repository.create(
+            db_session,
+            experiment,
+            tenant.tenant_id,
+        )
+
+
+def test_create_rolls_back_when_database_commit_fails(
+    db_session,
+    tenant,
+    experiment_repository,
+    monkeypatch,
+):
+    original_rollback = db_session.rollback
+    rollback_called = False
+
+    def simulate_commit_failure():
+        raise RuntimeError("Simulated database commit failure")
+
+    def track_rollback():
+        nonlocal rollback_called
+        rollback_called = True
+        original_rollback()
+
+    monkeypatch.setattr(
+        db_session,
+        "commit",
+        simulate_commit_failure,
+    )
+
+    monkeypatch.setattr(
+        db_session,
+        "rollback",
+        track_rollback,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Simulated database commit failure",
+    ):
+        experiment_repository.create(
+            db_session,
+            make_experiment(),
+            tenant.tenant_id,
+        )
+
+    assert rollback_called is True
+
+
+def test_update_status_raises_when_experiment_not_found(
+    db_session,
+    tenant,
+    experiment_repository,
+):
+    with pytest.raises(
+        KeyError,
+        match="Experiment not found",
+    ):
+        experiment_repository.update_status(
+            db_session,
+            str(uuid.uuid4()),
+            tenant.tenant_id,
+            "running",
+        )
+
+
+def test_update_status_rolls_back_when_commit_fails(
+    db_session,
+    tenant,
+    experiment_repository,
+    monkeypatch,
+):
+    experiment = make_experiment()
+
+    experiment_repository.create(
+        db_session,
+        experiment,
+        tenant.tenant_id,
+    )
+
+    original_rollback = db_session.rollback
+    rollback_called = False
+
+    def simulate_commit_failure():
+        raise RuntimeError("Simulated status update failure")
+
+    def track_rollback():
+        nonlocal rollback_called
+        rollback_called = True
+        original_rollback()
+
+    monkeypatch.setattr(
+        db_session,
+        "commit",
+        simulate_commit_failure,
+    )
+
+    monkeypatch.setattr(
+        db_session,
+        "rollback",
+        track_rollback,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Simulated status update failure",
+    ):
+        experiment_repository.update_status(
+            db_session,
+            experiment.experiment_id,
+            tenant.tenant_id,
+            "running",
+        )
+
+    assert rollback_called is True
+
+
+def test_delete_pending_raises_when_experiment_not_found(
+    db_session,
+    tenant,
+    experiment_repository,
+):
+    with pytest.raises(
+        KeyError,
+        match="Experiment not found",
+    ):
+        experiment_repository.delete_pending(
+            db_session,
+            str(uuid.uuid4()),
+            tenant.tenant_id,
+        )
+
+
+def test_delete_pending_rolls_back_when_commit_fails(
+    db_session,
+    tenant,
+    experiment_repository,
+    monkeypatch,
+):
+    experiment = make_experiment()
+
+    experiment_repository.create(
+        db_session,
+        experiment,
+        tenant.tenant_id,
+    )
+
+    original_rollback = db_session.rollback
+    rollback_called = False
+
+    def simulate_commit_failure():
+        raise RuntimeError("Simulated deletion failure")
+
+    def track_rollback():
+        nonlocal rollback_called
+        rollback_called = True
+        original_rollback()
+
+    monkeypatch.setattr(
+        db_session,
+        "commit",
+        simulate_commit_failure,
+    )
+
+    monkeypatch.setattr(
+        db_session,
+        "rollback",
+        track_rollback,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Simulated deletion failure",
+    ):
+        experiment_repository.delete_pending(
+            db_session,
+            experiment.experiment_id,
+            tenant.tenant_id,
+        )
+
+    assert rollback_called is True
+
+
+# --------------------------------------------------
+# EXECUTION REPOSITORY EDGE CASE TESTS
+# --------------------------------------------------
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [
+        "invalid-uuid",
+        None,
+        object(),
+    ],
+)
+def test_execution_repository_rejects_invalid_uuid(invalid_value):
+    from agentfault.database.repositories.execution_repository import (
+        ExecutionRepository,
+    )
+
+    with pytest.raises(ValueError, match="Invalid UUID"):
+        ExecutionRepository._to_uuid(invalid_value)
+
+
+def test_execution_repository_save_rejects_missing_experiment(
+    db_session,
+    tenant,
+):
+    from agentfault.database.repositories.execution_repository import (
+        ExecutionRepository,
+    )
+    from agentfault.services.experiment_service import ExperimentService
+
+    service = ExperimentService(
+        db_session,
+        str(tenant.tenant_id),
+    )
+
+    experiment = service.create_experiment(
+        name="Execution Repository Missing Experiment Test",
+        scenarios=[
+            make_scenario(
+                name="Successful scenario",
+                failure_sequence=["none"],
+            )
+        ],
+    )
+
+    execution = service.run_experiment(experiment.experiment_id)
+
+    unknown_tenant_id = uuid.uuid4()
+
+    with pytest.raises(
+        KeyError,
+        match="Experiment not found",
+    ):
+        ExecutionRepository().save(
+            db_session,
+            execution,
+            unknown_tenant_id,
+        )
+
+
+def test_execution_repository_save_rolls_back_on_commit_failure(
+    db_session,
+    tenant,
+    monkeypatch,
+):
+    from agentfault.database.repositories.execution_repository import (
+        ExecutionRepository,
+    )
+    from agentfault.services.experiment_service import ExperimentService
+
+    service = ExperimentService(
+        db_session,
+        str(tenant.tenant_id),
+    )
+
+    experiment = service.create_experiment(
+        name="Execution Repository Rollback Test",
+        scenarios=[
+            make_scenario(
+                name="Successful scenario",
+                failure_sequence=["none"],
+            )
+        ],
+    )
+
+    execution = service.run_experiment(experiment.experiment_id)
+
+    original_rollback = db_session.rollback
+    rollback_called = False
+
+    def simulate_commit_failure():
+        raise RuntimeError("Simulated execution save failure")
+
+    def track_rollback():
+        nonlocal rollback_called
+        rollback_called = True
+        original_rollback()
+
+    monkeypatch.setattr(
+        db_session,
+        "commit",
+        simulate_commit_failure,
+    )
+
+    monkeypatch.setattr(
+        db_session,
+        "rollback",
+        track_rollback,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Simulated execution save failure",
+    ):
+        ExecutionRepository().save(
+            db_session,
+            execution,
+            tenant.tenant_id,
+        )
+
+    assert rollback_called is True
+
+
+# --------------------------------------------------
+# EXECUTION REPOSITORY RETRIEVAL TESTS
+# --------------------------------------------------
+
+def test_get_execution_run_by_id(db_session, tenant):
+    from agentfault.database.repositories.execution_repository import (
+        ExecutionRepository,
+    )
+    from agentfault.services.experiment_service import ExperimentService
+
+    service = ExperimentService(
+        db_session,
+        str(tenant.tenant_id),
+    )
+
+    experiment = service.create_experiment(
+        name="Execution Get By ID Test",
+        scenarios=[
+            make_scenario(
+                name="Successful scenario",
+                failure_sequence=["none"],
+            )
+        ],
+    )
+
+    service.run_experiment(experiment.experiment_id)
+
+    repository = ExecutionRepository()
+
+    runs = repository.list_by_tenant(
+        db_session,
+        tenant.tenant_id,
+    )
+
+    assert len(runs) == 1
+
+    retrieved = repository.get_by_id(
+        db_session,
+        runs[0].run_id,
+        tenant.tenant_id,
+    )
+
+    assert retrieved is not None
+    assert retrieved.run_id == runs[0].run_id
+    assert retrieved.experiment_id == uuid.UUID(experiment.experiment_id)
+    assert len(retrieved.scenario_results) == 1
+
+
+def test_list_execution_runs_by_experiment(db_session, tenant):
+    from agentfault.database.repositories.execution_repository import (
+        ExecutionRepository,
+    )
+    from agentfault.services.experiment_service import ExperimentService
+
+    service = ExperimentService(
+        db_session,
+        str(tenant.tenant_id),
+    )
+
+    experiment = service.create_experiment(
+        name="Execution List By Experiment Test",
+        scenarios=[
+            make_scenario(
+                name="Successful scenario",
+                failure_sequence=["none"],
+            )
+        ],
+    )
+
+    service.run_experiment(experiment.experiment_id)
+
+    repository = ExecutionRepository()
+
+    runs = repository.list_by_experiment(
+        db_session,
+        experiment.experiment_id,
+        tenant.tenant_id,
+    )
+
+    assert len(runs) == 1
+    assert runs[0].experiment_id == uuid.UUID(
+        experiment.experiment_id
+    )
+    assert len(runs[0].scenario_results) == 1
+
+
+def test_tenant_repository_get_by_id_with_uuid_object(
+    db_session,
+    tenant,
+    tenant_repository,
+):
+    retrieved = tenant_repository.get_by_id(
+        db_session,
+        tenant.tenant_id,
+    )
+
+    assert retrieved is not None
+    assert retrieved.tenant_id == tenant.tenant_id
+    assert retrieved.name == tenant.name
+
+
+def test_tenant_repository_get_by_id_returns_none_for_missing_tenant(
+    db_session,
+    tenant_repository,
+):
+    missing_tenant_id = uuid.uuid4()
+
+    retrieved = tenant_repository.get_by_id(
+        db_session,
+        missing_tenant_id,
+    )
+
+    assert retrieved is None
+
+def test_tenant_repository_create_rolls_back_on_commit_failure(
+    db_session,
+    tenant_repository,
+    monkeypatch,
+):
+    def mock_commit():
+        raise RuntimeError("Simulated database commit failure")
+
+    rollback_called = False
+    original_rollback = db_session.rollback
+
+    def mock_rollback():
+        nonlocal rollback_called
+        rollback_called = True
+        original_rollback()
+
+    monkeypatch.setattr(db_session, "commit", mock_commit)
+    monkeypatch.setattr(db_session, "rollback", mock_rollback)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Simulated database commit failure",
+    ):
+        tenant_repository.create(
+            db_session,
+            "Rollback Test Tenant",
+        )
+
+    assert rollback_called is True
+
+def test_service_handles_execution_error_with_original_cause(
+    db_session, tenant, monkeypatch
+):
+    import agentfault.services.experiment_service as service_module
+
+    from agentfault.experiment_executor import (
+        ExperimentExecutionError,
+        build_experiment_execution,
+    )
+
+    service = ExperimentService(
+        db_session,
+        str(tenant.tenant_id),
+    )
+
+    experiment = service.create_experiment(
+        name="Execution Error With Cause",
+        scenarios=[make_scenario()],
+    )
+
+    original_error = RuntimeError("Original execution failure")
+
+    def simulate_execution_error(current_experiment):
+        current_experiment.start()
+        current_experiment.fail()
+
+        execution = build_experiment_execution(
+            current_experiment,
+            [],
+        )
+
+        error = ExperimentExecutionError(
+            "Experiment execution failed",
+            execution,
+        )
+
+        raise error from original_error
+
+    monkeypatch.setattr(
+        service_module,
+        "execute_experiment",
+        simulate_execution_error,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Original execution failure",
+    ):
+        service.run_experiment(experiment.experiment_id)
+
+    persisted = service.get_experiment(experiment.experiment_id)
+
+    assert persisted.status == "failed"
+
+
+def test_service_handles_execution_error_without_original_cause(
+    db_session, tenant, monkeypatch
+):
+    import agentfault.services.experiment_service as service_module
+
+    from agentfault.experiment_executor import (
+        ExperimentExecutionError,
+        build_experiment_execution,
+    )
+
+    service = ExperimentService(
+        db_session,
+        str(tenant.tenant_id),
+    )
+
+    experiment = service.create_experiment(
+        name="Execution Error Without Cause",
+        scenarios=[make_scenario()],
+    )
+
+    def simulate_execution_error(current_experiment):
+        current_experiment.start()
+        current_experiment.fail()
+
+        execution = build_experiment_execution(
+            current_experiment,
+            [],
+        )
+
+        error = ExperimentExecutionError(
+            "Experiment execution failed without cause",
+            execution,
+        )
+
+        raise error
+
+    monkeypatch.setattr(
+        service_module,
+        "execute_experiment",
+        simulate_execution_error,
+    )
+
+    with pytest.raises(
+        ExperimentExecutionError,
+        match="Experiment execution failed without cause",
+    ):
+        service.run_experiment(experiment.experiment_id)
+
+    persisted = service.get_experiment(experiment.experiment_id)
+
+    assert persisted.status == "failed"

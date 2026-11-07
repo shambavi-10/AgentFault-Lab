@@ -10,7 +10,15 @@ from agentfault.dashboard_service import (
     DashboardService,
     DashboardServiceError,
 )
-
+from agentfault.historical_analytics import (
+    HistoricalAnalyticsError,
+)
+from agentfault.historical_insights import (
+    HistoricalInsightsError,
+)
+from agentfault.recommendation_manager import (
+    RecommendationManagerError,
+)
 
 @pytest.fixture
 def dashboard(tmp_path):
@@ -350,3 +358,176 @@ def test_dashboard_data_contains_expected_sections(dashboard):
         "performance_trends",
         "experiment_highlights",
     }
+
+# --------------------------------------------------
+# DASHBOARD SERVICE ERROR HANDLING TESTS
+# --------------------------------------------------
+
+def test_experiment_overview_wraps_unexpected_error(
+    dashboard,
+    monkeypatch,
+):
+    def simulate_failure():
+        raise RuntimeError("Report storage unavailable")
+
+    monkeypatch.setattr(
+        dashboard.analytics.report_manager,
+        "list_reports",
+        simulate_failure,
+    )
+
+    with pytest.raises(
+        DashboardServiceError,
+        match="Unable to retrieve experiment overview",
+    ) as exc_info:
+        dashboard.get_experiment_overview()
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+
+
+def test_reliability_overview_wraps_insights_error(
+    dashboard,
+    monkeypatch,
+):
+    def simulate_failure():
+        raise HistoricalInsightsError("Insights unavailable")
+
+    monkeypatch.setattr(
+        dashboard.insights,
+        "analyze_all_experiments",
+        simulate_failure,
+    )
+
+    with pytest.raises(
+        DashboardServiceError,
+        match="Unable to retrieve reliability insights",
+    ) as exc_info:
+        dashboard.get_reliability_overview()
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        HistoricalInsightsError,
+    )
+
+
+def test_recommendation_overview_wraps_manager_error(
+    dashboard,
+    monkeypatch,
+):
+    def simulate_failure():
+        raise RecommendationManagerError(
+            "Recommendation storage unavailable"
+        )
+
+    monkeypatch.setattr(
+        dashboard.recommendation_manager,
+        "get_summary",
+        simulate_failure,
+    )
+
+    with pytest.raises(
+        DashboardServiceError,
+        match="Unable to retrieve recommendation overview",
+    ) as exc_info:
+        dashboard.get_recommendation_overview()
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        RecommendationManagerError,
+    )
+
+
+def test_performance_trends_wraps_analytics_error(
+    dashboard,
+    monkeypatch,
+):
+    def simulate_failure():
+        raise HistoricalAnalyticsError(
+            "Unable to calculate success rate"
+        )
+
+    monkeypatch.setattr(
+        dashboard.analytics,
+        "get_success_rate_trend",
+        simulate_failure,
+    )
+
+    with pytest.raises(
+        DashboardServiceError,
+        match="Unable to retrieve performance trends",
+    ) as exc_info:
+        dashboard.get_performance_trends()
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        HistoricalAnalyticsError,
+    )
+
+
+def test_experiment_highlights_wraps_analytics_error(
+    dashboard,
+    monkeypatch,
+):
+    def simulate_failure():
+        raise HistoricalAnalyticsError(
+            "Unable to retrieve best experiment"
+        )
+
+    monkeypatch.setattr(
+        dashboard.analytics,
+        "get_best_experiment",
+        simulate_failure,
+    )
+
+    with pytest.raises(
+        DashboardServiceError,
+        match="Unable to retrieve experiment highlights",
+    ) as exc_info:
+        dashboard.get_experiment_highlights()
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        HistoricalAnalyticsError,
+    )
+
+
+def test_dashboard_data_propagates_dashboard_service_error(
+    dashboard,
+    monkeypatch,
+):
+    def simulate_failure():
+        raise DashboardServiceError("Existing service error")
+
+    monkeypatch.setattr(
+        dashboard,
+        "get_experiment_overview",
+        simulate_failure,
+    )
+
+    with pytest.raises(
+        DashboardServiceError,
+        match="Existing service error",
+    ):
+        dashboard.get_dashboard_data()
+
+
+def test_dashboard_data_wraps_unexpected_error(
+    dashboard,
+    monkeypatch,
+):
+    def simulate_failure():
+        raise RuntimeError("Unexpected dashboard failure")
+
+    monkeypatch.setattr(
+        dashboard,
+        "get_experiment_overview",
+        simulate_failure,
+    )
+
+    with pytest.raises(
+        DashboardServiceError,
+        match="Unable to generate dashboard data",
+    ) as exc_info:
+        dashboard.get_dashboard_data()
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)

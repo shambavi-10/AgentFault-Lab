@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 
 from agentfault.historical_analytics import (

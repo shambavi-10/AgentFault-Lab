@@ -2,7 +2,7 @@
 from agentfault.fallback import execute_with_fallback
 from agentfault.models import ToolResult
 from agentfault.tracing import ExecutionTrace
-
+import pytest
 
 # ==================================================
 # BASIC FALLBACK TESTS
@@ -342,3 +342,153 @@ def test_fallback_chain_traces_each_attempt():
     assert len(fallback_started) == 2
     assert len(fallback_succeeded) == 1
     assert fallback_succeeded[0]["attempt"] == 2
+
+
+# ==================================================
+# ADDITIONAL COVERAGE TESTS
+# ==================================================
+
+def test_both_fallback_arguments_raise_error():
+    def primary():
+        return ToolResult(status="success")
+
+    def fallback():
+        return ToolResult(status="success")
+
+    with pytest.raises(
+        ValueError,
+        match="Provide fallback_tool or fallback_tools, not both",
+    ):
+        execute_with_fallback(
+            primary,
+            fallback_tool=fallback,
+            fallback_tools=[fallback],
+        )
+
+
+def test_primary_success_is_traced():
+    trace = ExecutionTrace()
+
+    def primary():
+        return ToolResult(
+            status="success",
+            data={"result": "primary"},
+        )
+
+    result = execute_with_fallback(
+        primary,
+        trace=trace,
+    )
+
+    assert result.status == "success"
+
+    event_types = [
+        event["event_type"]
+        for event in trace.get_events()
+    ]
+
+    assert "fallback_execution_started" in event_types
+    assert "primary_tool_started" in event_types
+    assert "primary_tool_succeeded" in event_types
+    assert "fallback_execution_completed" in event_types
+
+
+def test_non_retryable_primary_failure_is_traced():
+    trace = ExecutionTrace()
+
+    def primary():
+        return ToolResult(
+            status="failure",
+            error="Invalid request",
+            error_type="validation_error",
+            retryable=False,
+        )
+
+    result = execute_with_fallback(
+        primary,
+        fallback_tools=[],
+        trace=trace,
+    )
+
+    assert result.status == "failure"
+    assert result.error == "Invalid request"
+
+    event_types = [
+        event["event_type"]
+        for event in trace.get_events()
+    ]
+
+    assert "primary_tool_failed" in event_types
+    assert "fallback_skipped" in event_types
+    assert "fallback_execution_completed" in event_types
+
+    assert "fallback_tool_started" not in event_types
+
+
+def test_non_retryable_fallback_failure_is_traced():
+    trace = ExecutionTrace()
+
+    def primary():
+        return ToolResult(
+            status="failure",
+            error="Primary timeout",
+            error_type="timeout",
+            retryable=True,
+        )
+
+    def fallback():
+        return ToolResult(
+            status="failure",
+            error="Invalid backup request",
+            error_type="validation_error",
+            retryable=False,
+        )
+
+    result = execute_with_fallback(
+        primary,
+        fallback_tools=[fallback],
+        trace=trace,
+    )
+
+    assert result.status == "failure"
+    assert result.error == "Invalid backup request"
+
+    event_types = [
+        event["event_type"]
+        for event in trace.get_events()
+    ]
+
+    assert "fallback_tool_started" in event_types
+    assert "fallback_tool_failed" in event_types
+    assert "fallback_execution_completed" in event_types
+
+
+def test_empty_fallback_chain_is_traced():
+    trace = ExecutionTrace()
+
+    def primary():
+        return ToolResult(
+            status="failure",
+            error="Primary timeout",
+            error_type="timeout",
+            retryable=True,
+        )
+
+    result = execute_with_fallback(
+        primary,
+        fallback_tools=[],
+        trace=trace,
+    )
+
+    assert result.status == "failure"
+    assert result.error == "Primary timeout"
+
+    events = trace.get_events()
+
+    completed_events = [
+        event for event in events
+        if event["event_type"] == "fallback_execution_completed"
+    ]
+
+    assert len(completed_events) == 1
+    assert completed_events[0]["message"] == "All available tools failed."

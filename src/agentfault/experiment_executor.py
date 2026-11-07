@@ -29,7 +29,7 @@ class ScenarioExecutionResult:
 
 @dataclass
 class ExperimentExecution:
-    """Stores the results of a complete experiment."""
+    """Stores the results of an experiment execution."""
 
     experiment_id: str
     experiment_name: str
@@ -43,15 +43,73 @@ class ExperimentExecution:
     total_retries: int
 
 
+class ExperimentExecutionError(Exception):
+    """Execution failure containing partial execution history."""
+
+    def __init__(
+        self,
+        message: str,
+        execution: ExperimentExecution,
+    ):
+        super().__init__(message)
+        self.execution = execution
+
+
+def build_experiment_execution(
+    experiment: Experiment,
+    scenario_results: list[ScenarioExecutionResult],
+) -> ExperimentExecution:
+    """Build execution metrics from completed scenario results."""
+
+    total_scenarios = len(scenario_results)
+
+    passed_scenarios = sum(
+        result.passed for result in scenario_results
+    )
+
+    failed_scenarios = total_scenarios - passed_scenarios
+
+    success_rate = (
+        passed_scenarios / total_scenarios
+        if total_scenarios > 0
+        else 0.0
+    )
+
+    total_execution_time_ms = sum(
+        result.execution_time_ms
+        for result in scenario_results
+    )
+
+    total_retries = sum(
+        result.retry_count
+        for result in scenario_results
+    )
+
+    return ExperimentExecution(
+        experiment_id=experiment.experiment_id,
+        experiment_name=experiment.name,
+        status=experiment.status,
+        scenario_results=scenario_results,
+        total_scenarios=total_scenarios,
+        passed_scenarios=passed_scenarios,
+        failed_scenarios=failed_scenarios,
+        success_rate=round(success_rate, 4),
+        total_execution_time_ms=round(
+            total_execution_time_ms, 4
+        ),
+        total_retries=total_retries,
+    )
+
+
 def execute_experiment(
     experiment: Experiment,
     fallback_tools: Sequence[Callable[[], ToolResult]] | None = None,
 ) -> ExperimentExecution:
-    """Execute all scenarios in an experiment."""
+    """Execute all scenarios and preserve partial history on failure."""
 
     experiment.start()
 
-    scenario_results = []
+    scenario_results: list[ScenarioExecutionResult] = []
 
     try:
         for scenario in experiment.scenarios:
@@ -101,41 +159,20 @@ def execute_experiment(
 
         experiment.complete()
 
-    except Exception:
+    except Exception as exc:
         experiment.fail()
-        raise
 
-    total_scenarios = len(scenario_results)
+        partial_execution = build_experiment_execution(
+            experiment,
+            scenario_results,
+        )
 
-    passed_scenarios = sum(
-        result.passed for result in scenario_results
-    )
+        raise ExperimentExecutionError(
+            str(exc),
+            partial_execution,
+        ) from exc
 
-    failed_scenarios = total_scenarios - passed_scenarios
-
-    success_rate = passed_scenarios / total_scenarios
-
-    total_execution_time_ms = sum(
-        result.execution_time_ms
-        for result in scenario_results
-    )
-
-    total_retries = sum(
-        result.retry_count
-        for result in scenario_results
-    )
-
-    return ExperimentExecution(
-        experiment_id=experiment.experiment_id,
-        experiment_name=experiment.name,
-        status=experiment.status,
-        scenario_results=scenario_results,
-        total_scenarios=total_scenarios,
-        passed_scenarios=passed_scenarios,
-        failed_scenarios=failed_scenarios,
-        success_rate=round(success_rate, 4),
-        total_execution_time_ms=round(
-            total_execution_time_ms, 4
-        ),
-        total_retries=total_retries,
+    return build_experiment_execution(
+        experiment,
+        scenario_results,
     )

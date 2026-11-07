@@ -2,6 +2,7 @@
 import json
 
 import pytest
+from pathlib import Path
 
 from agentfault.report_storage import (
     ReportStorage,
@@ -216,3 +217,53 @@ def test_corrupted_json_raises_storage_error(storage):
 
     with pytest.raises(ReportStorageError, match="corrupted"):
         storage.get_report("corrupted")
+
+def test_get_report_raises_storage_error_on_read_failure(
+    storage,
+    monkeypatch,
+):
+    report_file = storage.storage_dir / "unreadable.json"
+    report_file.write_text("{}", encoding="utf-8")
+
+    original_open = Path.open
+
+    def mock_open(self, *args, **kwargs):
+        if self == report_file:
+            raise PermissionError("Permission denied")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", mock_open)
+
+    with pytest.raises(ReportStorageError, match="Unable to read report"):
+        storage.get_report("unreadable")
+
+
+def test_list_reports_raises_storage_error_on_corrupted_json(storage):
+    corrupted_file = storage.storage_dir / "corrupted-list.json"
+    corrupted_file.write_text("{invalid json", encoding="utf-8")
+
+    with pytest.raises(
+        ReportStorageError,
+        match="Unable to load report",
+    ):
+        storage.list_reports()
+
+
+def test_delete_report_raises_storage_error_on_unlink_failure(
+    storage,
+    sample_report,
+    monkeypatch,
+):
+    report_file = storage.save_report(sample_report)
+
+    def mock_unlink(self, *args, **kwargs):
+        if self == report_file:
+            raise PermissionError("Permission denied")
+
+    monkeypatch.setattr(Path, "unlink", mock_unlink)
+
+    with pytest.raises(
+        ReportStorageError,
+        match="Unable to delete report",
+    ):
+        storage.delete_report("experiment-001")

@@ -3,7 +3,10 @@ import pytest
 
 from agentfault.report_storage import ReportStorage
 from agentfault.report_manager import ReportManager
-from agentfault.historical_analytics import HistoricalAnalytics
+from agentfault.historical_analytics import (
+    HistoricalAnalytics,
+    HistoricalAnalyticsError,
+)
 from agentfault.historical_insights import (
     HistoricalInsights,
     HistoricalInsightsError,
@@ -191,3 +194,123 @@ def test_recommendations_are_generated(insights):
     assert len(result.issues) == 4
     assert len(result.recommendations) == 4
     assert result.risk_level == "high"
+
+
+def test_report_retrieval_historical_analytics_error(insights, monkeypatch):
+    engine, manager = insights
+
+    def fail_get_report(experiment_id):
+        raise HistoricalAnalyticsError("Database error")
+
+    monkeypatch.setattr(manager, "get_report", fail_get_report)
+
+    with pytest.raises(HistoricalInsightsError):
+        engine.analyze_experiment("exp-error")
+
+
+def test_report_retrieval_unexpected_error(insights, monkeypatch):
+    engine, manager = insights
+
+    def fail_get_report(experiment_id):
+        raise RuntimeError("Unexpected database failure")
+
+    monkeypatch.setattr(manager, "get_report", fail_get_report)
+
+    with pytest.raises(HistoricalInsightsError):
+        engine.analyze_experiment("exp-error")
+
+
+@pytest.mark.parametrize(
+    "metric",
+    ["success_rate", "average_latency_ms", "average_retries",
+     "fallback_usage_rate"],
+)
+def test_non_finite_metrics_are_rejected(insights, metric):
+    engine, manager = insights
+    report = create_report("exp-nan", "Invalid Metrics", 1.0, 100, 0, 0)
+    report[metric] = float("nan")
+    manager.reports["exp-nan"] = report
+
+    with pytest.raises(HistoricalInsightsError, match="finite numbers"):
+        engine.analyze_experiment("exp-nan")
+
+
+@pytest.mark.parametrize(
+    "metric",
+    ["success_rate", "average_latency_ms", "average_retries",
+     "fallback_usage_rate"],
+)
+def test_infinite_metrics_are_rejected(insights, metric):
+    engine, manager = insights
+    report = create_report("exp-inf", "Infinite Metrics", 1.0, 100, 0, 0)
+    report[metric] = float("inf")
+    manager.reports["exp-inf"] = report
+
+    with pytest.raises(HistoricalInsightsError, match="finite numbers"):
+        engine.analyze_experiment("exp-inf")
+
+
+@pytest.mark.parametrize(
+    "metric",
+    ["success_rate", "average_latency_ms", "average_retries",
+     "fallback_usage_rate"],
+)
+def test_missing_metrics_are_rejected(insights, metric):
+    engine, manager = insights
+    report = create_report("exp-missing", "Missing Metrics", 1.0, 100, 0, 0)
+    del report[metric]
+    manager.reports["exp-missing"] = report
+
+    with pytest.raises(HistoricalInsightsError, match="invalid or missing"):
+        engine.analyze_experiment("exp-missing")
+
+
+@pytest.mark.parametrize(
+    "metric,value",
+    [
+        ("success_rate", "invalid"),
+        ("average_latency_ms", None),
+        ("average_retries", "invalid"),
+        ("fallback_usage_rate", None),
+    ],
+)
+def test_invalid_metric_types_are_rejected(insights, metric, value):
+    engine, manager = insights
+    report = create_report("exp-invalid", "Invalid Types", 1.0, 100, 0, 0)
+    report[metric] = value
+    manager.reports["exp-invalid"] = report
+
+    with pytest.raises(HistoricalInsightsError):
+        engine.analyze_experiment("exp-invalid")
+
+
+@pytest.mark.parametrize(
+    "metric,value",
+    [
+        ("success_rate", -0.1),
+        ("average_latency_ms", -1),
+        ("average_retries", -1),
+        ("fallback_usage_rate", -0.1),
+        ("fallback_usage_rate", 1.1),
+    ],
+)
+def test_out_of_range_metrics_are_rejected(insights, metric, value):
+    engine, manager = insights
+    report = create_report("exp-range", "Out of Range", 1.0, 100, 0, 0)
+    report[metric] = value
+    manager.reports["exp-range"] = report
+
+    with pytest.raises(HistoricalInsightsError):
+        engine.analyze_experiment("exp-range")
+
+
+def test_analyze_all_experiments_wraps_analytics_error(insights, monkeypatch):
+    engine, _ = insights
+
+    def fail_get_reports():
+        raise HistoricalAnalyticsError("Unable to read reports")
+
+    monkeypatch.setattr(engine.analytics, "_get_reports", fail_get_reports)
+
+    with pytest.raises(HistoricalInsightsError, match="Unable to retrieve"):
+        engine.analyze_all_experiments()

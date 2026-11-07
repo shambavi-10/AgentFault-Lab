@@ -1,3 +1,4 @@
+
 from sqlalchemy.orm import Session
 
 from agentfault.database.repositories.experiment_repository import (
@@ -9,6 +10,8 @@ from agentfault.database.repositories.execution_repository import (
 from agentfault.experiment import Experiment
 from agentfault.experiment_executor import (
     ExperimentExecution,
+    ExperimentExecutionError,
+    build_experiment_execution,
     execute_experiment,
 )
 from agentfault.reliability_config import ReliabilityConfig
@@ -89,7 +92,7 @@ class ExperimentService:
         self,
         experiment_id: str,
     ) -> ExperimentExecution:
-        """Execute an experiment and persist its complete execution history."""
+        """Execute an experiment and persist complete or partial history."""
 
         experiment = self.get_experiment(experiment_id)
 
@@ -103,7 +106,31 @@ class ExperimentService:
         try:
             execution = execute_experiment(experiment)
 
+        except ExperimentExecutionError as exc:
+            # Mark the experiment as failed.
+            self.repository.update_status(
+                self.session,
+                experiment_id,
+                self.tenant_id,
+                "failed",
+            )
+
+            # Persist completed scenarios and their trace events.
+            self.execution_repository.save(
+                self.session,
+                exc.execution,
+                self.tenant_id,
+            )
+
+            # Re-raise the original execution exception.
+            if exc.__cause__ is not None:
+                raise exc.__cause__ from exc
+
+            raise
+
         except Exception:
+            # Handle unexpected failures outside the executor's
+            # dedicated exception handling.
             if experiment.status == "failed":
                 self.repository.update_status(
                     self.session,
@@ -111,8 +138,22 @@ class ExperimentService:
                     self.tenant_id,
                     "failed",
                 )
+
+                # Persist a failed run even when no scenario completed.
+                failed_execution = build_experiment_execution(
+                    experiment,
+                    [],
+                )
+
+                self.execution_repository.save(
+                    self.session,
+                    failed_execution,
+                    self.tenant_id,
+                )
+
             raise
 
+        # Persist the final experiment status.
         self.repository.update_status(
             self.session,
             experiment_id,
@@ -120,6 +161,7 @@ class ExperimentService:
             execution.status,
         )
 
+        # Persist the complete execution history.
         self.execution_repository.save(
             self.session,
             execution,
