@@ -1,6 +1,7 @@
 
 import os
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from dotenv import load_dotenv
@@ -471,3 +472,120 @@ def test_failed_fallback_attempt_is_not_counted_as_fallback_usage(
     assert execution.scenario_results[0].fallback_count == 1
     assert execution.scenario_results[0].fallback_used is False
     assert summary["fallback_usage_rate"] == 0.0
+
+
+@pytest.mark.parametrize(
+    "kwargs, expected_message",
+    [
+        (
+            {"target_latency_ms": 0},
+            "Target latency must be greater than zero",
+        ),
+        (
+            {"max_average_retries": 0},
+            "Maximum average retries must be greater than zero",
+        ),
+        (
+            {"max_fallback_usage_rate": 0},
+            "Maximum fallback usage rate must be between 0 and 1",
+        ),
+        (
+            {"max_fallback_usage_rate": 1.1},
+            "Maximum fallback usage rate must be between 0 and 1",
+        ),
+    ],
+)
+def test_constructor_rejects_invalid_thresholds(
+    kwargs,
+    expected_message,
+):
+    with pytest.raises(ValueError, match=expected_message):
+        ExecutionReliabilityService(
+            session=None,
+            tenant_id="test-tenant",
+            **kwargs,
+        )
+
+
+class FakeExecutionRepository:
+    def __init__(self, runs):
+        self.runs = runs
+
+    def list_by_tenant(self, session, tenant_id):
+        return self.runs
+
+
+def create_fake_execution(
+    success_rate=1.0,
+    latency=100.0,
+    retry_count=0,
+    fallback_used=False,
+    circuit_breaker_enabled=False,
+):
+    scenario = SimpleNamespace(
+        retry_count=retry_count,
+        fallback_used=fallback_used,
+        circuit_breaker_enabled=circuit_breaker_enabled,
+    )
+
+    return SimpleNamespace(
+        success_rate=success_rate,
+        total_execution_time_ms=latency,
+        scenario_results=[scenario],
+    )
+
+
+def create_service_with_fake_history(run):
+    repository = FakeExecutionRepository([run])
+
+    return ExecutionReliabilityService(
+        session=None,
+        tenant_id="test-tenant",
+        execution_repository=repository,
+    )
+
+
+def test_non_finite_metrics_are_rejected():
+    run = create_fake_execution(
+        success_rate=float("nan"),
+    )
+
+    service = create_service_with_fake_history(run)
+
+    with pytest.raises(
+        ValueError,
+        match="Execution history contains non-finite metrics",
+    ):
+        service.generate_reliability_summary()
+
+
+def test_invalid_success_rate_is_rejected():
+    run = create_fake_execution(
+        success_rate=1.5,
+    )
+
+    service = create_service_with_fake_history(run)
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid success rate in execution history",
+    ):
+        service.generate_reliability_summary()
+
+
+@pytest.mark.parametrize(
+    "run",
+    [
+        create_fake_execution(latency=-1.0),
+        create_fake_execution(retry_count=-1),
+        create_fake_execution(fallback_used=2),
+    ],
+)
+def test_invalid_execution_metrics_are_rejected(run):
+    service = create_service_with_fake_history(run)
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid execution metrics",
+    ):
+        service.generate_reliability_summary()
