@@ -1,15 +1,22 @@
-
 import pytest
 
 from agentfault.report_storage import ReportStorage
 from agentfault.report_manager import ReportManager
-from agentfault.historical_analytics import HistoricalAnalytics
-from agentfault.historical_insights import HistoricalInsights
+
+from agentfault.historical_analytics import (
+    HistoricalAnalytics,
+    HistoricalAnalyticsError,
+)
+
+from agentfault.historical_insights import (
+    HistoricalInsights,
+    HistoricalInsightsError,
+)
+
 from agentfault.recommendation_engine import (
     RecommendationEngine,
     RecommendationEngineError,
 )
-
 
 def create_report(
     experiment_id,
@@ -218,3 +225,68 @@ def test_empty_collection_returns_empty_recommendations(engine):
     recommendation_engine, _ = engine
 
     assert recommendation_engine.generate_all_recommendations() == []
+
+def test_report_retrieval_exception_is_wrapped(engine, monkeypatch):
+    recommendation_engine, manager = engine
+    original_error = RuntimeError("Database unavailable")
+
+    def mock_get_report(experiment_id):
+        raise original_error
+
+    monkeypatch.setattr(manager, "get_report", mock_get_report)
+
+    with pytest.raises(
+        RecommendationEngineError,
+        match="Unable to retrieve experiment report",
+    ) as exc_info:
+        recommendation_engine.generate_recommendations("exp-001")
+
+    assert exc_info.value.__cause__ is original_error
+
+
+def test_historical_insights_error_is_wrapped(engine, monkeypatch):
+    recommendation_engine, manager = engine
+    manager.reports["exp-001"] = create_report(
+        "exp-001", "Test Agent", 1.0, 100, 0, 0
+    )
+
+    original_error = HistoricalInsightsError("Analysis failed")
+
+    def mock_analyze_experiment(experiment_id):
+        raise original_error
+
+    monkeypatch.setattr(
+        recommendation_engine.insights,
+        "analyze_experiment",
+        mock_analyze_experiment,
+    )
+
+    with pytest.raises(
+        RecommendationEngineError,
+        match="Unable to analyze experiment reliability",
+    ) as exc_info:
+        recommendation_engine.generate_recommendations("exp-001")
+
+    assert exc_info.value.__cause__ is original_error
+
+
+def test_historical_analytics_error_is_wrapped(engine, monkeypatch):
+    recommendation_engine, _ = engine
+    original_error = HistoricalAnalyticsError("Report listing failed")
+
+    def mock_get_reports():
+        raise original_error
+
+    monkeypatch.setattr(
+        recommendation_engine.insights.analytics,
+        "_get_reports",
+        mock_get_reports,
+    )
+
+    with pytest.raises(
+        RecommendationEngineError,
+        match="Unable to retrieve historical experiments",
+    ) as exc_info:
+        recommendation_engine.generate_all_recommendations()
+
+    assert exc_info.value.__cause__ is original_error

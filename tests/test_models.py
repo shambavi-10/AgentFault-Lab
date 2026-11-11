@@ -57,3 +57,14 @@ def test_failure_cannot_contain_data():
 def test_invalid_status_is_rejected():
     with pytest.raises(ValidationError):
         ToolResult(status="pending")
+
+def test_success_cannot_be_retryable():
+    with pytest.raises(
+        ValidationError,
+        match="Successful results cannot be retryable",
+    ):
+        ToolResult(
+            status="success",
+            data={"amount": 100},
+            retryable=True,
+        )

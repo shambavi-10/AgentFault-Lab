@@ -2,7 +2,10 @@
 import pytest
 
 from agentfault.report_storage import ReportStorage
-from agentfault.report_manager import ReportManager
+from agentfault.report_manager import (
+    ReportManager,
+    ReportManagerError,
+)
 from agentfault.historical_analytics import (
     HistoricalAnalytics,
     HistoricalAnalyticsError,
@@ -208,3 +211,63 @@ def test_historical_summary_empty(analytics):
         "total_retries": 0,
         "total_fallbacks": 0,
     }
+
+
+def test_get_reports_raises_historical_analytics_error(
+    analytics,
+    monkeypatch,
+):
+    original_error = ReportManagerError("Storage failure")
+
+    def mock_list_reports():
+        raise original_error
+
+    monkeypatch.setattr(
+        analytics.report_manager,
+        "list_reports",
+        mock_list_reports,
+    )
+
+    with pytest.raises(
+        HistoricalAnalyticsError,
+        match="Unable to retrieve historical reports",
+    ) as exc_info:
+        analytics.get_success_rate_trend()
+
+    assert exc_info.value.__cause__ is original_error
+
+
+def test_compare_experiments_handles_report_manager_error(
+    analytics,
+    monkeypatch,
+):
+    original_error = ReportManagerError("Report retrieval failure")
+
+    def mock_get_report(experiment_id):
+        raise original_error
+
+    monkeypatch.setattr(
+        analytics.report_manager,
+        "get_report",
+        mock_get_report,
+    )
+
+    with pytest.raises(
+        HistoricalAnalyticsError,
+        match="Unable to retrieve experiments for comparison",
+    ) as exc_info:
+        analytics.compare_experiments("exp-001", "exp-002")
+
+    assert exc_info.value.__cause__ is original_error
+
+def test_compare_experiments_when_first_experiment_is_missing(
+    populated_analytics,
+):
+    with pytest.raises(
+        HistoricalAnalyticsError,
+        match="Experiment not found: missing",
+    ):
+        populated_analytics.compare_experiments(
+            "missing",
+            "exp-002",
+        )

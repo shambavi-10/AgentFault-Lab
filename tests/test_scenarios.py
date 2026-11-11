@@ -121,3 +121,24 @@ def test_scenario_runner_raises_when_sequence_is_exhausted():
 
     with pytest.raises(RuntimeError, match="Scenario sequence exhausted"):
         runner.run()
+
+def test_empty_failure_sequence_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match="Failure sequence cannot be empty"
+    ):
+        FailureScenario(
+            name="empty_sequence",
+            failure_sequence=[]
+        )
+
+def test_invalid_expected_status_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match="Invalid expected status"
+    ):
+        FailureScenario(
+            name="invalid_status",
+            failure_sequence=["timeout"],
+            expected_status="pending"
+        )

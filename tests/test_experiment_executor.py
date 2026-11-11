@@ -2,7 +2,11 @@
 import pytest
 
 from agentfault.experiment import Experiment
-from agentfault.experiment_executor import execute_experiment
+from agentfault.experiment_executor import (
+    ExperimentExecutionError,
+    execute_experiment,
+)
+from agentfault import experiment_executor
 from agentfault.models import ToolResult
 from agentfault.reliability_config import ReliabilityConfig
 from agentfault.scenarios import FailureScenario
@@ -223,3 +227,47 @@ def test_experiment_handles_fallback_exception():
     assert execution.passed_scenarios == 0
     assert execution.scenario_results[0].result.status == "failure"
     assert execution.scenario_results[0].fallback_used is False
+
+def test_unexpected_exception_preserves_partial_execution(
+    monkeypatch,
+):
+    experiment = make_experiment([
+        make_scenario(name="First scenario"),
+        make_scenario(name="Second scenario"),
+    ])
+
+    original_validate_result = experiment_executor.validate_result
+    call_count = 0
+
+    def failing_validate_result(result):
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 2:
+            raise RuntimeError("Unexpected validation error")
+
+        return original_validate_result(result)
+
+    monkeypatch.setattr(
+        experiment_executor,
+        "validate_result",
+        failing_validate_result,
+    )
+
+    with pytest.raises(ExperimentExecutionError) as exc_info:
+        execute_experiment(experiment)
+
+    error = exc_info.value
+    partial_execution = error.execution
+
+    assert experiment.status == "failed"
+    assert str(error) == "Unexpected validation error"
+    assert isinstance(error.__cause__, RuntimeError)
+
+    assert partial_execution.status == "failed"
+    assert partial_execution.total_scenarios == 1
+    assert len(partial_execution.scenario_results) == 1
+    assert (
+        partial_execution.scenario_results[0].scenario_name
+        == "First scenario"
+    )

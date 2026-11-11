@@ -174,3 +174,13 @@ def test_pending_experiment_cannot_fail():
 
     with pytest.raises(ValueError):
         experiment.fail()
+def test_experiment_rejects_non_string_id():
+    with pytest.raises(
+        ValueError,
+        match="Experiment ID must be a string",
+    ):
+        Experiment(
+            name="Invalid ID Experiment",
+            scenarios=[make_scenario()],
+            experiment_id=123,
+        )

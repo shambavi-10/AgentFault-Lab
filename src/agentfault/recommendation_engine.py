@@ -1,11 +1,11 @@
-
 from dataclasses import dataclass
+
+from agentfault.historical_analytics import HistoricalAnalyticsError
 
 from agentfault.historical_insights import (
     HistoricalInsights,
     HistoricalInsightsError,
 )
-
 
 class RecommendationEngineError(Exception):
     """Raised when recommendation generation fails."""

@@ -3,7 +3,7 @@ from agentfault.circuit_breaker import CircuitBreaker, CircuitState
 from agentfault.faults import simulated_tool
 from agentfault.models import ToolResult
 from agentfault.retry import run_with_retry
-
+import pytest
 
 # Existing retry tests
 
@@ -185,3 +185,25 @@ def test_retry_engine_works_without_circuit_breaker():
 
     assert result.status == "success"
     assert calls["count"] == 1
+
+
+@pytest.mark.parametrize(
+    "base_delay, max_delay",
+    [
+        (-1.0, 30.0),
+        (1.0, -1.0),
+    ],
+)
+def test_negative_retry_delays_raise_error(
+    base_delay,
+    max_delay,
+):
+    with pytest.raises(
+        ValueError,
+        match="Retry delays cannot be negative",
+    ):
+        run_with_retry(
+            lambda: simulated_tool("none"),
+            base_delay=base_delay,
+            max_delay=max_delay,
+        )
