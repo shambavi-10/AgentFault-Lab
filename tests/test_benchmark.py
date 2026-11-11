@@ -208,3 +208,59 @@ def test_identical_run_success_rates_have_zero_standard_deviation():
     assert result.mean_run_success_rate == 1.0
     assert result.success_rate_std_dev == 0.0
 
+
+def test_negative_backoff_seconds_raise_error():
+    with pytest.raises(
+        ValueError,
+        match="Total backoff cannot be negative",
+    ):
+        calculate_benchmark(
+            "Agent A",
+            10,
+            8,
+            0,
+            10.0,
+            [0.8],
+            total_backoff_seconds=-1.0,
+        )
+
+
+def test_empty_run_success_rates_raise_error():
+    with pytest.raises(
+        ValueError,
+        match="At least one run success rate is required",
+    ):
+        calculate_benchmark(
+            "Agent A",
+            10,
+            8,
+            0,
+            10.0,
+            [0.8],
+            run_success_rates=[],
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_rate",
+    [
+        -0.1,
+        1.1,
+        True,
+        "0.8",
+    ],
+)
+def test_invalid_run_success_rates_raise_error(invalid_rate):
+    with pytest.raises(
+        ValueError,
+        match="Run success rates must be between 0 and 1",
+    ):
+        calculate_benchmark(
+            "Agent A",
+            10,
+            8,
+            0,
+            10.0,
+            [0.8],
+            run_success_rates=[invalid_rate],
+        )
