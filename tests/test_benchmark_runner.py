@@ -236,3 +236,36 @@ def test_default_repetitions_is_one():
     )
 
     assert results[0].total_executions == 1
+
+
+def test_empty_agent_configs_raise_error():
+    scenario = FailureScenario(
+        name="Normal Execution",
+        failure_sequence=["none"],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="At least one agent configuration is required",
+    ):
+        run_benchmark_suite(
+            configs=[],
+            scenarios=[scenario],
+        )
+
+
+def test_empty_scenarios_raise_error():
+    config = AgentConfig(
+        name="Test Agent",
+        max_attempts=1,
+        retry_strategy="none",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="At least one scenario is required",
+    ):
+        run_benchmark_suite(
+            configs=[config],
+            scenarios=[],
+        )
