@@ -1,7 +1,34 @@
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Python
 __pycache__/
-.pytest_cache/
-*.pyc
-.env
-# Generated package metadata
+*.py[cod]
 *.egg-info/
+build/
+dist/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+
+# Generated reports and local data
+reports/
+recommendations.json
+
+# Operating system
+.DS_Store
+Thumbs.db

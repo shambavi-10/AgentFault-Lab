@@ -7,9 +7,29 @@ name = "agentfault-lab"
 version = "1.0.0"
 description = "AI Agent Reliability Testing and Chaos Engineering Platform"
 requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.162,<1.0",
+    "uvicorn>=0.54,<1.0",
+    "pydantic>=2.14,<3.0",
+    "SQLAlchemy>=2.1,<3.0",
+    "alembic>=1.20,<2.0",
+    "psycopg[binary]>=3.3,<4.0",
+    "python-dotenv>=1.2,<2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.2,<10.0",
+    "pytest-cov>=7.1,<8.0",
+    "httpx>=0.28,<1.0",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
